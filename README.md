@@ -1,2 +1,90 @@
-# Synthwave_Midi_Reimaginer
-Reimaginer any synthwave midi song automaticly incl. rendering
+# Synthwave MIDI Reimaginer GUI
+
+## v0.1.5 notes
+
+This build fixes the seed controls after playback/rendering. The Seed field and **New Seed** button now stay usable. Auto Seed is enabled by default, so every render creates a different version. The exact seed is written into the output analysis TXT and embedded in the MIDI metadata. To reproduce a result, disable Auto Seed and enter the saved seed manually, or edit/click New Seed which automatically switches to manual seed mode.
+
+Harmony Lock should normally stay ON. It detects a likely key/mode, builds ordered scale degrees, and snaps copied bass/lead/arp/pad material to compatible scale/chord tones to reduce clashes between tracks. v0.1.5
+
+A small offline-friendly PyQt6 desktop tool that analyzes a MIDI file, creates a cleaner synthwave-inspired derivative version, and optionally renders a WAV/MP3 preview with an internal Python synthesizer.
+
+The tool was built from the previous `make_fixed_synthwave_v2.py` idea, but the new version is more generic: it no longer assumes that a specific track number is the bad high synth. It analyzes each MIDI and tries to detect roles like bass, lead/hook, arp/pluck, pad source, drums, and high/problematic material.
+
+## Start on Windows
+
+1. Run `install_windows.bat`
+2. After setup, run `run_windows.bat`
+3. Choose a `.mid` or `.midi` file
+4. Click **Analyze MIDI**
+5. Click **Create New Version**
+
+The installer creates a local `.venv` folder. After the first successful setup, the GUI can run offline via `run_windows.bat`.
+
+## Files in this package
+
+- `app/midi_reimaginer_gui.py` - PyQt6 GUI
+- `app/midi_reimaginer_core.py` - MIDI parser, analyzer, transformer, WAV renderer, optional MP3 converter
+- `install_windows.bat` - creates `.venv` and installs requirements
+- `run_windows.bat` - starts the GUI
+- `reinstall_windows.bat` - removes `.venv` and reinstalls
+- `prepare_wheelhouse_online.bat` - downloads dependency wheels for future offline reinstall
+- `run_cli_example.bat` - command-line example using `examples/test.mid`
+- `legacy/make_fixed_synthwave_v2.py` - the previous manual script for reference
+- `examples/test.mid` - the test MIDI used during development
+
+## Offline reinstall / wheelhouse mode
+
+For a fully offline reinstall on the same or a very similar Windows/Python setup:
+
+1. On an internet-connected machine, run `prepare_wheelhouse_online.bat`.
+2. Keep the generated `wheelhouse` folder together with this package.
+3. Later, `install_windows.bat` will automatically prefer `wheelhouse` and install without internet.
+
+Note: PyQt6 wheels are Python-version and platform specific. A wheelhouse prepared on Python 3.12 Windows x64 is intended for the same kind of setup.
+
+## MP3 export and the ffmpeg fix
+
+The earlier script failed on this console output:
+
+```text
+Unrecognized option 'hide_banner'.
+Error splitting the argument list: Option not found
+```
+
+That usually means that the executable found as `ffmpeg.EXE` is not a real FFmpeg binary or is a limited shim. This GUI fixes that in two ways:
+
+1. It validates candidates with `ffmpeg -version` and requires the output to contain `ffmpeg version`.
+2. It no longer depends on `-hide_banner`.
+
+If no real ffmpeg is found, MP3 is skipped safely. The WAV file is still created.
+
+Supported ffmpeg locations:
+
+- `SYNTHWAVE_FFMPEG` environment variable
+- `tools/ffmpeg/bin/ffmpeg.exe`
+- `tools/ffmpeg/ffmpeg.exe`
+- `portable_ffmpeg/ffmpeg.exe`
+- a real `ffmpeg.exe` on PATH
+
+## Command-line usage
+
+```bat
+.venv\Scripts\python.exe app\midi_reimaginer_core.py input.mid --out-dir output --prefix my_song_v2
+```
+
+Options:
+
+```text
+--no-audio       Only create MIDI and analysis text
+--no-mp3         Skip MP3 conversion
+--sample-rate    44100 or 48000 recommended
+--intensity      Transformation strength from 0.0 to 1.0
+```
+
+## Current limits
+
+This is a heuristic MIDI re-arranger, not a full AI music model. It should work best with structured multi-track MIDI files. Very sparse one-track files or unusual SMPTE-time MIDI files may need manual cleanup.
+
+## Source
+
+github.com/zeittresor/Synthwave_Midi_Reimaginer

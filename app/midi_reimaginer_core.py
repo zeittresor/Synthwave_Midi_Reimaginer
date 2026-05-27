@@ -1,0 +1,1276 @@
+#!/usr/bin/env python3
+"""
+Synthwave MIDI Reimaginer core engine.
+
+Offline-friendly MIDI analysis + transformation + built-in audio renderer.
+Does not need a Windows wavetable synth. MP3 export is optional and uses a real
+ffmpeg binary only when one is detected.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from pathlib import Path
+from collections import defaultdict, Counter
+from typing import Callable, Iterable
+import argparse
+import json
+import math
+import os
+import random
+import secrets
+import shutil
+import subprocess
+import wave
+
+Progress = Callable[[str], None]
+
+# -----------------------------
+# Minimal MIDI reader / writer
+# -----------------------------
+@dataclass
+class Event:
+    abs_tick: int
+    delta: int
+    type: str
+    status: int | None = None
+    channel: int | None = None
+    data: bytes = b""
+    meta_type: int | None = None
+    raw: bytes = b""
+    desc: str = ""
+    order: int = 10
+
+
+@dataclass
+class Track:
+    events: list[Event] = field(default_factory=list)
+    name: str = ""
+
+
+@dataclass
+class Note:
+    start: int
+    end: int
+    pitch: int
+    vel: int
+    ch: int
+    program: int = 0
+    track: int = 0
+    order: int = 0
+
+    @property
+    def duration(self) -> int:
+        return max(1, self.end - self.start)
+
+
+@dataclass
+class TrackAnalysis:
+    index: int
+    name: str
+    notes: list[Note]
+    channels: Counter
+    programs: Counter
+    role: str = "other"
+    avg_pitch: float = 0.0
+    min_pitch: int = 0
+    max_pitch: int = 0
+    avg_dur: float = 0.0
+    density: float = 0.0
+    poly_score: float = 0.0
+    is_drum: bool = False
+    high_problem_score: float = 0.0
+
+
+@dataclass
+class MidiAnalysis:
+    source: Path
+    fmt: int
+    division: int
+    track_count: int
+    end_tick: int
+    tempo_us: int
+    bpm: float
+    time_signature: tuple[int, int, int, int]
+    tracks: list[TrackAnalysis]
+    roles: dict[str, int | None]
+    summary: str
+
+
+def log(progress: Progress | None, text: str) -> None:
+    if progress:
+        progress(text)
+
+
+def new_auto_seed() -> int:
+    """Generate a fresh non-zero 31-bit seed for one render job."""
+    return int(secrets.randbelow(2_147_483_646) + 1)
+
+
+def normalize_seed(seed: int | str | None) -> int:
+    if seed is None or str(seed).strip() == "":
+        return new_auto_seed()
+    value = int(seed)
+    if value < 0:
+        value = abs(value)
+    return int(value % 2_147_483_647) or 1
+
+
+def read_var(data: bytes, i: int) -> tuple[int, int]:
+    value = 0
+    while True:
+        if i >= len(data):
+            raise ValueError("Unexpected end while reading MIDI varlen value")
+        b = data[i]
+        i += 1
+        value = (value << 7) | (b & 0x7F)
+        if not (b & 0x80):
+            break
+    return value, i
+
+
+def write_var(v: int) -> bytes:
+    v = max(0, int(v))
+    if v == 0:
+        return b"\x00"
+    parts = [v & 0x7F]
+    v >>= 7
+    while v:
+        parts.append((v & 0x7F) | 0x80)
+        v >>= 7
+    return bytes(reversed(parts))
+
+
+def parse_midi(path: Path):
+    data = Path(path).read_bytes()
+    i = 0
+    if data[i:i+4] != b"MThd":
+        raise ValueError("Not a standard MIDI file: missing MThd")
+    i += 4
+    hdr_len = int.from_bytes(data[i:i+4], "big"); i += 4
+    fmt = int.from_bytes(data[i:i+2], "big")
+    ntr = int.from_bytes(data[i+2:i+4], "big")
+    div = int.from_bytes(data[i+4:i+6], "big")
+    if div & 0x8000:
+        raise ValueError("SMPTE-time MIDI files are not supported by this lightweight engine yet")
+    i += hdr_len
+    tracks: list[Track] = []
+    for ti in range(ntr):
+        if i + 8 > len(data) or data[i:i+4] != b"MTrk":
+            raise ValueError(f"Missing MTrk chunk at track {ti}")
+        i += 4
+        length = int.from_bytes(data[i:i+4], "big"); i += 4
+        end = i + length
+        evs: list[Event] = []
+        abs_tick = 0
+        running: int | None = None
+        name = ""
+        while i < end:
+            delta, i = read_var(data, i)
+            abs_tick += delta
+            b = data[i]; i += 1
+            if b == 0xFF:
+                meta_type = data[i]; i += 1
+                l, i = read_var(data, i)
+                dat = data[i:i+l]; i += l
+                desc = ""
+                if meta_type == 0x03:
+                    try:
+                        name = dat.decode("latin1")
+                    except Exception:
+                        name = repr(dat)
+                    desc = name
+                evs.append(Event(abs_tick, delta, "meta", None, None, dat, meta_type, desc=desc))
+            elif b in (0xF0, 0xF7):
+                l, i = read_var(data, i)
+                dat = data[i:i+l]; i += l
+                evs.append(Event(abs_tick, delta, "sysex", b, None, dat))
+                running = None
+            else:
+                if b & 0x80:
+                    status = b
+                    running = status
+                    hi = status & 0xF0
+                    ch = status & 0x0F
+                    l = 1 if hi in (0xC0, 0xD0) else 2
+                    dat = data[i:i+l]; i += l
+                else:
+                    if running is None:
+                        raise ValueError("Running status byte without prior status")
+                    status = running
+                    hi = status & 0xF0
+                    ch = status & 0x0F
+                    l = 1 if hi in (0xC0, 0xD0) else 2
+                    dat = bytes([b]) + data[i:i+l-1]; i += l-1
+                typ = {
+                    0x80:"note_off", 0x90:"note_on", 0xA0:"poly_aftertouch", 0xB0:"control_change",
+                    0xC0:"program_change", 0xD0:"channel_aftertouch", 0xE0:"pitch_bend",
+                }.get(status & 0xF0, "midi")
+                evs.append(Event(abs_tick, delta, typ, status, ch, dat))
+        tracks.append(Track(evs, name))
+    return fmt, ntr, div, tracks
+
+
+def event_raw(ev: Event) -> bytes:
+    if ev.type == "meta":
+        return bytes([0xFF, ev.meta_type or 0]) + write_var(len(ev.data)) + ev.data
+    if ev.type == "sysex":
+        return bytes([ev.status or 0xF0]) + write_var(len(ev.data)) + ev.data
+    if ev.status is None:
+        return ev.raw
+    return bytes([ev.status]) + ev.data
+
+
+def write_midi(path: Path, fmt: int, division: int, tracks_events: list[list[Event]]):
+    out = bytearray()
+    out += b"MThd" + (6).to_bytes(4,"big") + fmt.to_bytes(2,"big") + len(tracks_events).to_bytes(2,"big") + division.to_bytes(2,"big")
+    for evs in tracks_events:
+        evs = sorted(enumerate(evs), key=lambda x: (x[1].abs_tick, x[1].order, x[0]))
+        body = bytearray()
+        prev = 0
+        has_end = False
+        for _, ev in evs:
+            tick = max(0, int(round(ev.abs_tick)))
+            dt = max(0, tick - prev)
+            prev += dt
+            body += write_var(dt) + event_raw(ev)
+            if ev.type == "meta" and ev.meta_type == 0x2F:
+                has_end = True
+        if not has_end:
+            body += write_var(0) + b"\xFF\x2F\x00"
+        out += b"MTrk" + len(body).to_bytes(4,"big") + body
+    Path(path).write_bytes(out)
+
+
+def make_meta(abs_tick: int, meta_type: int, data: bytes, order: int = 0) -> Event:
+    return Event(int(abs_tick), 0, "meta", None, None, bytes(data), meta_type, order=order)
+
+
+def make_midi(abs_tick: int, status: int, data: list[int] | bytes, order: int = 10) -> Event:
+    hi = status & 0xF0
+    typ = {0x80:"note_off",0x90:"note_on",0xA0:"poly_aftertouch",0xB0:"control_change",0xC0:"program_change",0xD0:"channel_aftertouch",0xE0:"pitch_bend"}.get(hi,"midi")
+    return Event(int(abs_tick), 0, typ, status, status & 0x0F, bytes(int(x) & 0xFF for x in data), order=order)
+
+
+def clip(v, lo, hi):
+    return max(lo, min(hi, int(round(v))))
+
+
+def quantize_tick(t: int, grid: int) -> int:
+    grid = max(1, int(grid))
+    return int(round(t / grid) * grid)
+
+
+def add_note(evs: list[Event], ch: int, pitch: int, start: int, duration: int, vel: int = 90, order_on: int = 30):
+    pitch = clip(pitch, 0, 127)
+    start = max(0, int(round(start)))
+    dur = max(8, int(round(duration)))
+    end = start + dur
+    evs.append(make_midi(start, 0x90 | ch, [pitch, clip(vel, 1, 127)], order=order_on))
+    evs.append(make_midi(end, 0x80 | ch, [pitch, 64], order=20))
+
+
+def setup_track(name: str, ch: int | None = None, program: int | None = None, volume=100, pan=64, reverb=24, chorus=18):
+    evs = [make_meta(0, 0x03, name.encode("latin1", errors="replace"), order=0)]
+    if ch is not None:
+        if program is not None:
+            evs.append(make_midi(0, 0xC0 | ch, [program], order=1))
+        evs.append(make_midi(0, 0xB0 | ch, [7, volume], order=2))
+        evs.append(make_midi(0, 0xB0 | ch, [10, pan], order=3))
+        evs.append(make_midi(0, 0xB0 | ch, [91, reverb], order=4))
+        evs.append(make_midi(0, 0xB0 | ch, [93, chorus], order=5))
+    return evs
+
+
+def extract_notes_from_track(track: Track, track_index: int, song_end: int) -> list[Note]:
+    stacks = defaultdict(list)
+    notes: list[Note] = []
+    order = 0
+    current_program = defaultdict(lambda: 0)
+    for e in track.events:
+        if e.status is None or e.channel is None:
+            order += 1
+            continue
+        hi = e.status & 0xF0
+        ch = e.channel
+        if hi == 0xC0 and e.data:
+            current_program[ch] = e.data[0]
+        elif hi == 0x90 and len(e.data) >= 2 and e.data[1] > 0:
+            stacks[(ch, e.data[0])].append((e.abs_tick, e.data[1], current_program[ch], order))
+        elif (hi == 0x80 and len(e.data) >= 2) or (hi == 0x90 and len(e.data) >= 2 and e.data[1] == 0):
+            key = (ch, e.data[0])
+            if stacks[key]:
+                st, vel, prog, o = stacks[key].pop(0)
+                if e.abs_tick > st:
+                    notes.append(Note(st, e.abs_tick, e.data[0], vel, ch, prog, track_index, o))
+        order += 1
+    for (ch, pitch), qs in stacks.items():
+        for st, vel, prog, o in qs:
+            notes.append(Note(st, min(st + 384, song_end), pitch, vel, ch, prog, track_index, o))
+    notes.sort(key=lambda n: (n.start, n.pitch, n.order))
+    return notes
+
+
+def get_tempo_and_sig(tracks: list[Track]) -> tuple[int, tuple[int, int, int, int]]:
+    tempo = 500000
+    sig = (4, 2, 24, 8)
+    for t in tracks:
+        for e in t.events:
+            if e.type == "meta" and e.meta_type == 0x51 and len(e.data) == 3:
+                tempo = int.from_bytes(e.data, "big")
+                return tempo, sig
+            if e.type == "meta" and e.meta_type == 0x58 and len(e.data) >= 4:
+                sig = tuple(e.data[:4])  # type: ignore[assignment]
+    return tempo, sig
+
+
+def estimate_poly_score(notes: list[Note]) -> float:
+    if not notes:
+        return 0.0
+    starts = Counter(quantize_tick(n.start, 24) for n in notes)
+    simultaneous = sum(1 for c in starts.values() if c >= 2)
+    return simultaneous / max(1, len(starts))
+
+
+def classify_tracks(source: Path, fmt: int, div: int, tracks: list[Track], progress: Progress | None = None) -> MidiAnalysis:
+    log(progress, f"[32%] Parsed {len(tracks)} track(s). Extracting notes...")
+    end_tick = max([0] + [e.abs_tick for t in tracks for e in t.events])
+    tempo_us, sig = get_tempo_and_sig(tracks)
+    bpm = 60_000_000 / tempo_us if tempo_us else 120.0
+    analyses: list[TrackAnalysis] = []
+    total_tracks = max(1, len(tracks))
+    for idx, t in enumerate(tracks):
+        pct = 35 + int(45 * (idx + 1) / total_tracks)
+        log(progress, f"[{pct}%] Analyzing track {idx + 1}/{len(tracks)}: {t.name or f'Track {idx}'}")
+        notes = extract_notes_from_track(t, idx, end_tick)
+        if notes:
+            pitches = [n.pitch for n in notes]
+            durations = [n.duration for n in notes]
+            chs = Counter(n.ch for n in notes)
+            progs = Counter(n.program for n in notes)
+            ta = TrackAnalysis(
+                index=idx, name=t.name or f"Track {idx}", notes=notes, channels=chs, programs=progs,
+                avg_pitch=sum(pitches) / len(pitches), min_pitch=min(pitches), max_pitch=max(pitches),
+                avg_dur=sum(durations) / len(durations), density=len(notes) / max(1, end_tick / div),
+                poly_score=estimate_poly_score(notes), is_drum=(chs.most_common(1)[0][0] == 9),
+            )
+            high_count = sum(1 for p in pitches if p >= 88)
+            ta.high_problem_score = (high_count / len(pitches)) * 2.0 + max(0.0, (ta.max_pitch - 92) / 20.0)
+        else:
+            ta = TrackAnalysis(idx, t.name or f"Track {idx}", [], Counter(), Counter())
+        analyses.append(ta)
+
+    log(progress, "[84%] Detecting musical roles and problem tracks...")
+    melodic = [a for a in analyses if a.notes and not a.is_drum]
+    drums = [a for a in analyses if a.notes and a.is_drum]
+    roles: dict[str, int | None] = {"bass": None, "lead": None, "hook_problem": None, "arp": None, "pad_source": None, "drums": None}
+    if drums:
+        roles["drums"] = max(drums, key=lambda a: len(a.notes)).index
+    if melodic:
+        bass = min(melodic, key=lambda a: (a.avg_pitch + (0 if a.min_pitch < 52 else 18), -len(a.notes)))
+        roles["bass"] = bass.index
+        for a in melodic:
+            if a.index == bass.index:
+                a.role = "bass"
+        high = max(melodic, key=lambda a: (a.high_problem_score, a.max_pitch, a.avg_pitch))
+        if high.high_problem_score > 0.10 or high.max_pitch >= 88:
+            roles["hook_problem"] = high.index
+            if analyses[high.index].role == "other":
+                analyses[high.index].role = "high/problem-hook"
+        lead_candidates = [a for a in melodic if a.index != roles["bass"]]
+        if lead_candidates:
+            # Lead should usually be a real melodic contour, not merely the highest tiny squeak track.
+            # The high/problem track is still used for the de-squeaked hook role separately.
+            lead = max(
+                lead_candidates,
+                key=lambda a: (
+                    min(len(a.notes), 500) * 0.020
+                    + a.density * 2.0
+                    + a.avg_pitch / 50.0
+                    - a.high_problem_score * 1.8
+                    - (4.0 if a.avg_pitch > 92 else 0.0)
+                    - (2.0 if (a.programs and a.programs.most_common(1)[0][0] >= 112) else 0.0)
+                    - (2.0 if len(a.notes) < 24 else 0.0)
+                )
+            )
+            roles["lead"] = lead.index
+            if analyses[lead.index].role == "other":
+                analyses[lead.index].role = "lead"
+            arp = max(lead_candidates, key=lambda a: (a.density, -a.avg_dur, len(a.notes) * 0.01))
+            roles["arp"] = arp.index
+            if analyses[arp.index].role == "other":
+                analyses[arp.index].role = "arp/pluck"
+            pad_candidates = [a for a in lead_candidates if a.index != roles.get("hook_problem")] or lead_candidates
+            pad = max(pad_candidates, key=lambda a: (a.poly_score * 4.0 + a.avg_dur / max(1, div) - a.density * 0.1 + min(len(a.notes), 200) * 0.002))
+            roles["pad_source"] = pad.index
+            if analyses[pad.index].role == "other":
+                analyses[pad.index].role = "chord/pad-source"
+    for a in analyses:
+        if a.is_drum:
+            a.role = "drums"
+        elif a.role == "other" and a.notes:
+            if a.avg_pitch < 58:
+                a.role = "low support"
+            elif a.density > 4.0:
+                a.role = "busy texture"
+            else:
+                a.role = "melodic source"
+
+    log(progress, "[94%] Building analysis summary...")
+
+    lines = [
+        f"Format {fmt}, {len(tracks)} tracks, PPQ {div}, length {end_tick} ticks, approx. {bpm:.1f} BPM.",
+        "Detected roles:",
+    ]
+    for k, v in roles.items():
+        if v is not None:
+            lines.append(f"  - {k}: Track {v} ({analyses[v].name})")
+    lines.append("\nTrack details:")
+    for a in analyses:
+        if not a.notes:
+            lines.append(f"  #{a.index:02d} {a.name}: no notes")
+        else:
+            lines.append(
+                f"  #{a.index:02d} {a.name}: {len(a.notes)} notes, role={a.role}, "
+                f"pitch {a.min_pitch}-{a.max_pitch}, avg {a.avg_pitch:.1f}, density {a.density:.2f}/quarter"
+            )
+    return MidiAnalysis(source, fmt, div, len(tracks), end_tick, tempo_us, bpm, sig, analyses, roles, "\n".join(lines))
+
+
+def analyze_midi(path: Path | str, progress: Progress | None = None) -> MidiAnalysis:
+    p = Path(path)
+    log(progress, f"[5%] Reading MIDI file: {p.name}")
+    fmt, ntr, div, tracks = parse_midi(p)
+    log(progress, f"[28%] MIDI parsed: format {fmt}, {ntr} track(s), PPQ {div}")
+    analysis = classify_tracks(p, fmt, div, tracks, progress=progress)
+    log(progress, "[100%] Analysis finished.")
+    return analysis
+
+
+def notes_for_role(analysis: MidiAnalysis, role: str) -> list[Note]:
+    idx = analysis.roles.get(role)
+    if idx is None or idx >= len(analysis.tracks):
+        return []
+    return analysis.tracks[idx].notes
+
+
+def all_melodic_notes(analysis: MidiAnalysis) -> list[Note]:
+    notes: list[Note] = []
+    for t in analysis.tracks:
+        if t.notes and not t.is_drum:
+            notes.extend(t.notes)
+    return sorted(notes, key=lambda n: (n.start, n.pitch))
+
+
+def pitch_into_range(p: int, lo: int, hi: int) -> int:
+    p = int(p)
+    while p > hi:
+        p -= 12
+    while p < lo:
+        p += 12
+    return clip(p, lo, hi)
+
+
+def closest_scale_pc(pc: int, scale: list[int]) -> int:
+    return min(scale, key=lambda x: min((x-pc) % 12, (pc-x) % 12))
+
+
+MODE_INTERVALS = {
+    "major": [0, 2, 4, 5, 7, 9, 11],
+    "minor": [0, 2, 3, 5, 7, 8, 10],
+    "dorian": [0, 2, 3, 5, 7, 9, 10],
+    "mixolydian": [0, 2, 4, 5, 7, 9, 10],
+}
+
+NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
+
+
+def mode_scale(tonic: int, mode: str = "minor") -> list[int]:
+    intervals = MODE_INTERVALS.get(mode, MODE_INTERVALS["minor"])
+    return [((tonic + i) % 12) for i in intervals]
+
+
+def _weighted_pitch_classes(analysis: MidiAnalysis) -> Counter:
+    weights = Counter()
+    bass_idx = analysis.roles.get("bass")
+    hook_problem_idx = analysis.roles.get("hook_problem")
+    for tr in analysis.tracks:
+        if tr.is_drum or not tr.notes:
+            continue
+        role_weight = 1.0
+        if tr.index == bass_idx or tr.role == "bass":
+            role_weight = 4.2
+        elif tr.index == hook_problem_idx:
+            # Problem-hook tracks are often tiny, squeaky ornaments. They should not define the key.
+            role_weight = 0.25
+        elif tr.avg_pitch > 90:
+            role_weight = 0.35
+        elif tr.role in ("chord/pad-source", "low support"):
+            role_weight = 1.6
+        for n in tr.notes:
+            dur = max(1, n.duration)
+            # Lower voices usually carry harmony; give them more voting power.
+            low_boost = 1.0 + max(0, 72 - n.pitch) / 48.0
+            weights[n.pitch % 12] += dur * role_weight * low_boost
+    return weights
+
+
+def detect_key_and_mode(analysis: MidiAnalysis) -> tuple[int, str, list[int], float]:
+    """Return tonic, mode, ordered scale pitch classes and a soft confidence score.
+
+    The generated arrangement uses this as a hard safety rail. Earlier versions
+    used the seven most common pitch classes in frequency order, which was enough
+    for analysis but wrong for building triads; degree indexing on an unordered
+    scale can create unrelated pad chords and therefore obvious clashes.
+    """
+    weights = _weighted_pitch_classes(analysis)
+    if not weights:
+        return 0, "minor", mode_scale(0, "minor"), 0.0
+
+    # Krumhansl-ish profiles. Good enough for MIDI clean-up and deterministic offline use.
+    profiles = {
+        "major": [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88],
+        "minor": [6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17],
+    }
+    scores: list[tuple[float, int, str]] = []
+    for mode, profile in profiles.items():
+        for tonic in range(12):
+            score = 0.0
+            for pc, w in weights.items():
+                # profile index 0 is tonic, so rotate the input pc into the candidate key.
+                score += float(w) * profile[(pc - tonic) % 12]
+            # Mild synthwave/default preference for minor unless major is clearly better.
+            if mode == "minor":
+                score *= 1.025
+            scores.append((score, tonic, mode))
+    scores.sort(reverse=True)
+    best, tonic, mode = scores[0]
+    second = scores[1][0] if len(scores) > 1 else best
+    confidence = (best - second) / max(best, 1.0)
+    return tonic, mode, mode_scale(tonic, mode), confidence
+
+
+def snap_pitch_to_scale(pitch: int, scale: list[int], *, prefer_down: bool = False) -> int:
+    pitch = int(round(pitch))
+    candidates = []
+    for delta in range(-6, 7):
+        p = pitch + delta
+        if 0 <= p <= 127 and (p % 12) in scale:
+            candidates.append(p)
+    if not candidates:
+        return pitch
+    if prefer_down:
+        return min(candidates, key=lambda p: (abs(p - pitch), 0 if p <= pitch else 1))
+    return min(candidates, key=lambda p: (abs(p - pitch), abs((p % 12) - (pitch % 12))))
+
+
+def scale_degree_index(pc: int, scale: list[int]) -> int:
+    pc = pc % 12
+    if pc in scale:
+        return scale.index(pc)
+    return scale.index(closest_scale_pc(pc, scale))
+
+
+def chord_tones_for_root(root: int, scale: list[int], seventh: bool = False) -> list[int]:
+    i = scale_degree_index(root, scale)
+    tones = [scale[i], scale[(i + 2) % len(scale)], scale[(i + 4) % len(scale)]]
+    if seventh and len(scale) >= 7:
+        tones.append(scale[(i + 6) % len(scale)])
+    return tones
+
+
+def active_root_for_tick(tick: int, roots: list[tuple[int, int]]) -> int:
+    if not roots:
+        return 0
+    current = roots[0][1]
+    for st, root in roots:
+        if st <= tick:
+            current = root
+        else:
+            break
+    return current
+
+
+def snap_pitch_to_chord_or_scale(
+    pitch: int,
+    tick: int,
+    roots: list[tuple[int, int]],
+    scale: list[int],
+    *,
+    chord_bias: float = 0.55,
+    prefer_down: bool = False,
+) -> int:
+    """Quantize a copied source pitch so it does not fight the generated pads.
+
+    First snap to the global scale. If the pitch still sits far away from the
+    active chord, pull it to a nearby chord tone. Short arps can use lower
+    chord_bias, long leads/pads should use higher chord_bias.
+    """
+    p = snap_pitch_to_scale(pitch, scale, prefer_down=prefer_down)
+    root = active_root_for_tick(tick, roots)
+    chord = chord_tones_for_root(root, scale, seventh=True)
+    if (p % 12) in chord:
+        return p
+    candidates = []
+    for pc in chord:
+        for octave in range(1, 10):
+            q = pc + 12 * octave
+            if 0 <= q <= 127:
+                candidates.append(q)
+    if not candidates:
+        return p
+    q = min(candidates, key=lambda x: abs(x - p))
+    # Pull stronger for long notes and high-volume lead lines, weaker for decorative fast notes.
+    if abs(q - p) <= (2 + int(4 * chord_bias)):
+        return q
+    return p
+
+
+def sanitize_copied_pitch(
+    pitch: int,
+    lo: int,
+    hi: int,
+    tick: int,
+    roots: list[tuple[int, int]],
+    scale: list[int],
+    *,
+    chord_bias: float = 0.45,
+) -> int:
+    p = pitch_into_range(pitch, lo, hi)
+    p = snap_pitch_to_chord_or_scale(p, tick, roots, scale, chord_bias=chord_bias, prefer_down=(p > hi - 4))
+    return pitch_into_range(p, lo, hi)
+
+
+def derive_roots(analysis: MidiAnalysis, bar: int, scale_hint: list[int] | None = None) -> list[tuple[int, int]]:
+    bass_notes = notes_for_role(analysis, "bass")
+    pool = bass_notes if bass_notes else all_melodic_notes(analysis)
+    if not pool:
+        pool = [Note(0, analysis.end_tick, 48, 90, 1)]
+    roots: list[tuple[int, int]] = []
+    if scale_hint is None:
+        # Build a compact source pitch-class palette.
+        pc_counter = Counter(n.pitch % 12 for n in all_melodic_notes(analysis))
+        common = [pc for pc, _ in pc_counter.most_common(7)]
+        scale_hint = common if len(common) >= 5 else [0, 2, 3, 5, 7, 8, 10]
+    for st in range(0, max(bar, analysis.end_tick), bar * 2):
+        c = Counter()
+        for n in pool:
+            if st <= n.start < st + bar * 2:
+                c[n.pitch % 12] += n.duration
+        root = c.most_common(1)[0][0] if c else (roots[-1][1] if roots else scale_hint[0])
+        root = closest_scale_pc(root, scale_hint)
+        roots.append((st, root))
+    return roots
+
+
+def nearest_pitch(pc: int, center: int) -> int:
+    candidates = [pc + 12*o for o in range(1, 10)]
+    return min(candidates, key=lambda p: abs(p-center))
+
+
+def build_reimagined_midi(
+    src: Path | str,
+    out_mid: Path | str,
+    *,
+    style: str = "clean_synthwave",
+    intensity: float = 0.65,
+    preserve_length: bool = True,
+    harmony_lock: bool = True,
+    seed: int | None = None,
+    progress: Progress | None = None,
+) -> tuple[Path, MidiAnalysis]:
+    src = Path(src)
+    out_mid = Path(out_mid)
+    seed = normalize_seed(seed)
+    rng = random.Random(seed)
+    variant = rng.randrange(4)
+    log(progress, f"Analysiere MIDI: {src.name}")
+    log(progress, f"Generation seed: {seed} / arrangement variant {variant}")
+    analysis = analyze_midi(src, progress=progress)
+    div = analysis.division
+    bar = div * 4
+    song_end = analysis.end_tick if preserve_length else min(analysis.end_tick, 96 * bar)
+    song_end = max(song_end, 8 * bar)
+
+    # Nudge into synthwave-friendly tempo but don't destroy the original feel.
+    tempo_jitter = rng.uniform(-1.4, 1.4)
+    target_bpm = max(88.0, min(132.0, analysis.bpm * (1.02 + 0.06 * intensity) + tempo_jitter))
+    tempo = int(round(60_000_000 / target_bpm))
+    log(progress, f"Erzeuge neue Version bei ca. {target_bpm:.1f} BPM")
+
+    all_notes = all_melodic_notes(analysis)
+    tonic, mode, scale, key_confidence = detect_key_and_mode(analysis)
+    log(progress, f"Harmony lock: {'ON' if harmony_lock else 'OFF'} - detected {NOTE_NAMES[tonic]} {mode} (confidence {key_confidence:.2f})")
+
+    roots = derive_roots(analysis, bar, scale)
+    pluck_phase = rng.randrange(8)
+    vibe_offset = rng.randrange(2)
+    tick_phase = rng.randrange(4)
+    hook_transpose = rng.choice([-12, 0, 0, 0, 12]) if intensity > 0.75 else rng.choice([0, 0, 0, 12])
+    hat_swing = rng.choice([div // 20, div // 18, div // 16])
+    fill_variant = rng.randrange(4)
+
+    new_tracks: list[list[Event]] = []
+    meta = [
+        make_meta(0, 0x03, b"Synthwave MIDI Reimaginer GUI", order=0),
+        make_meta(0, 0x01, f"Seed: {seed}; Variant: {variant}; Harmony lock: {'ON' if harmony_lock else 'OFF'}".encode("latin1", errors="replace"), order=1),
+        make_meta(0, 0x51, tempo.to_bytes(3, "big"), order=2),
+        make_meta(0, 0x58, bytes(analysis.time_signature), order=3),
+    ]
+    for b, label in [(0,b"INTRO"),(8,b"GROOVE"),(24,b"HOOK"),(48,b"CHORUS"),(64,b"ALT"),(80,b"OUTRO")]:
+        if b * bar < song_end:
+            meta.append(make_meta(b * bar, 0x06, label, order=4))
+    meta.append(make_meta(song_end, 0x2F, b"", order=99))
+    new_tracks.append(meta)
+
+    bass_src = notes_for_role(analysis, "bass") or [n for n in all_notes if n.pitch < 60] or all_notes[:]
+    if not bass_src:
+        bass_src = [Note(0, song_end, 48, 90, 1)]
+    bass = setup_track("LOCKED ANALOG BASS", ch=1, program=38, volume=115, pan=48, reverb=10, chorus=18)
+    for n in bass_src:
+        if n.start >= song_end:
+            continue
+        st = quantize_tick(n.start, div // 4)
+        dur = max(div // 8, quantize_tick(n.duration, div // 8))
+        p = pitch_into_range(n.pitch, 36, 55)
+        if harmony_lock:
+            p = sanitize_copied_pitch(p, 36, 55, st, roots, scale, chord_bias=0.75)
+        add_note(bass, 1, p, st, min(int(dur * 0.88), song_end - st), n.vel * 0.95)
+        if intensity > 0.55 and st >= 32*bar and (st // max(1, div//2)) % 8 == 0:
+            add_note(bass, 1, max(24, p-12), st, min(div//2, song_end-st), n.vel * 0.35)
+    bass.append(make_meta(song_end, 0x2F, b"", order=99)); new_tracks.append(bass)
+
+    arp_src = notes_for_role(analysis, "arp") or all_notes
+    pluck = setup_track("CLEAN FM PLUCK", ch=2, program=5, volume=84, pan=82, reverb=34, chorus=24)
+    for i, n in enumerate(arp_src):
+        if n.start >= song_end:
+            continue
+        skip_mod = 10 - int(4 * intensity)
+        if skip_mod > 2 and (i + pluck_phase) % skip_mod == skip_mod - 1 and n.start > 16*bar:
+            continue
+        st = quantize_tick(n.start, div // 4)
+        dur = max(div // 10, int(n.duration * (0.48 + 0.18 * intensity)))
+        p = pitch_into_range(n.pitch - (12 if n.pitch > 82 else 0), 52, 82)
+        if harmony_lock:
+            p = sanitize_copied_pitch(p, 52, 82, st, roots, scale, chord_bias=0.42)
+        add_note(pluck, 2, p, st, min(dur, song_end-st), n.vel * 0.58)
+    pluck.append(make_meta(song_end, 0x2F, b"", order=99)); new_tracks.append(pluck)
+
+    vibe_src = all_notes if len(all_notes) < 200 else sorted(all_notes, key=lambda n: (n.start, n.pitch))[vibe_offset::2]
+    vibe = setup_track("GLASS ARP SUPPORT", ch=3, program=11, volume=76, pan=36, reverb=52, chorus=30)
+    for i, n in enumerate(vibe_src):
+        if n.start >= song_end or i % 5 == 4:
+            continue
+        st = quantize_tick(n.start + (div//2 if i % 8 == 3 else 0), div // 4)
+        if st >= song_end:
+            continue
+        p = pitch_into_range(n.pitch + (12 if n.pitch < 60 else 0), 60, 84)
+        if harmony_lock:
+            p = sanitize_copied_pitch(p, 60, 84, st, roots, scale, chord_bias=0.58)
+        add_note(vibe, 3, p, st, min(max(36, int(n.duration * 0.40)), song_end-st), n.vel * 0.36)
+    vibe.append(make_meta(song_end, 0x2F, b"", order=99)); new_tracks.append(vibe)
+
+    # Soft perc ticks from dense sources, not high squeaks.
+    ticks = setup_track("SOFT TONAL TICKS", ch=4, program=115, volume=55, pan=96, reverb=18, chorus=8)
+    tick_src = notes_for_role(analysis, "hook_problem") or notes_for_role(analysis, "arp") or all_notes
+    for i, n in enumerate(tick_src[:1200]):
+        if n.start >= song_end or i % 3 == 2:
+            continue
+        st = quantize_tick(n.start, div // 8)
+        if harmony_lock:
+            tick_chord = chord_tones_for_root(active_root_for_tick(st, roots), scale, seventh=True)
+            pc = tick_chord[((i // 4) + tick_phase) % len(tick_chord)]
+            p = nearest_pitch(pc, 76)
+        else:
+            p = 74 + ((i // 4) % 7)
+        add_note(ticks, 4, p, st, min(max(18, div//7), song_end-st), 42 + (i % 4) * 6)
+    ticks.append(make_meta(song_end, 0x2F, b"", order=99)); new_tracks.append(ticks)
+
+    # Warm pad from derived roots.
+    pad = setup_track("WARM ANALOG PAD", ch=5, program=89, volume=72, pan=62, reverb=72, chorus=55)
+    for idx, (st, root) in enumerate(roots):
+        if st < 2 * bar or st >= song_end:
+            continue
+        pcs = chord_tones_for_root(root, scale, seventh=(idx % 3 == 1 and len(scale) >= 6))
+        dur = min(bar * 2 - div // 4, song_end - st)
+        for j, pc in enumerate(pcs):
+            p = nearest_pitch(pc, 52 + j * 5 + (variant - 1) * 2)
+            if j == 0 and p > 55:
+                p -= 12
+            add_note(pad, 5, p, st + j * 4, max(div//2, dur - j*4), 42 + j*6)
+    pad.append(make_meta(song_end, 0x2F, b"", order=99)); new_tracks.append(pad)
+
+    # De-squeaked hook: take the high/problem source if present and compress it into a memorable mid-range motif.
+    hook_src = notes_for_role(analysis, "hook_problem") or notes_for_role(analysis, "lead") or all_notes
+    motif_notes = sorted(hook_src, key=lambda n: (n.start, -n.pitch))[:16]
+    if not motif_notes:
+        motif = [72, 70, 67, 65]
+    else:
+        # Preserve contour but force it into a musical octave range.
+        sampled = motif_notes[:8]
+        motif = []
+        for n in sampled:
+            p = pitch_into_range(n.pitch, 60, 76)
+            if harmony_lock:
+                p = sanitize_copied_pitch(p, 60, 76, n.start, roots, scale, chord_bias=0.82)
+            motif.append(p)
+        # remove immediate duplicates
+        compact = []
+        for p in motif:
+            if not compact or compact[-1] != p:
+                compact.append(p)
+        motif = (compact or motif)[:6]
+        if motif:
+            rot = variant % len(motif)
+            motif = motif[rot:] + motif[:rot]
+            motif = [pitch_into_range(p + hook_transpose, 58, 79) for p in motif]
+    hook = setup_track("ICON HOOK - DE-SQUEAKED", ch=6, program=80, volume=90, pan=28, reverb=42, chorus=38)
+    section_step = 8 * bar
+    start_section = 16 * bar if song_end > 32 * bar else 4 * bar
+    for sec_start in range(start_section, song_end, section_step):
+        for rep in range(2 if intensity >= 0.55 else 1):
+            phrase = sec_start + rep * 2 * bar
+            if phrase >= song_end:
+                continue
+            for k, p in enumerate(motif[:6]):
+                rhythm_patterns = [
+                    [0, div, div + div//2, 2*div + div//2, 3*div, 3*div + div//2],
+                    [0, div//2, div + div//2, 2*div, 2*div + div//2, 3*div + div//2],
+                    [0, div, div*2, div*2 + div//2, 3*div, 3*div + div//2],
+                    [0, div//2, div, div + div//2, 2*div + div//2, 3*div],
+                ]
+                dur_patterns = [
+                    [div*3//4, div//3, div//3, div*2//3, div//2, div//3],
+                    [div//2, div//2, div//3, div//2, div//3, div*2//3],
+                    [div*3//4, div*3//4, div//2, div//3, div//2, div//3],
+                    [div//3, div//2, div//2, div//3, div*2//3, div//2],
+                ]
+                rhythm = rhythm_patterns[variant][k % 6]
+                dur = dur_patterns[variant][k % 6]
+                p2 = p + (12 if k == 0 and sec_start >= song_end * 0.65 else 0)
+                add_note(hook, 6, pitch_into_range(p2, 58, 79), phrase + rhythm, min(dur, song_end-(phrase+rhythm)), 86-k*4)
+            answer = phrase + 3*div
+            if answer < song_end:
+                for k, p in enumerate(reversed(motif[:3])):
+                    add_note(hook, 6, pitch_into_range(p-12, 48, 68), answer + k*(div//2), min(div//3, song_end-(answer+k*(div//2))), 54-k*4)
+    hook.append(make_meta(song_end, 0x2F, b"", order=99)); new_tracks.append(hook)
+
+    lead_src = notes_for_role(analysis, "lead") or hook_src
+    lead = setup_track("ROUNDED LEAD CONTOUR", ch=7, program=81, volume=78, pan=104, reverb=44, chorus=34)
+    last_st_pitch: tuple[int, int] | None = None
+    for i, n in enumerate(lead_src):
+        if n.start >= song_end:
+            continue
+        st = quantize_tick(n.start, div // 4)
+        p = pitch_into_range(n.pitch, 55, 84)
+        if harmony_lock:
+            p = sanitize_copied_pitch(p, 55, 84, st, roots, scale, chord_bias=0.50)
+        if last_st_pitch == (st, p) and i % 2:
+            continue
+        if intensity > 0.70 and (i + variant) % 29 == 0 and n.start > 24 * bar:
+            continue
+        last_st_pitch = (st, p)
+        dur = max(div//8, int(n.duration * 0.70))
+        add_note(lead, 7, p, st, min(dur, song_end-st), n.vel * 0.56)
+    lead.append(make_meta(song_end, 0x2F, b"", order=99)); new_tracks.append(lead)
+
+    echo_src = all_notes[::max(1, len(all_notes)//1000)] if len(all_notes) > 1000 else all_notes
+    echo = setup_track("SUPPORT SAW ECHO", ch=8, program=88, volume=58, pan=72, reverb=52, chorus=44)
+    for i, n in enumerate(echo_src):
+        if n.start >= song_end or i % 7 == 6:
+            continue
+        st = quantize_tick(n.start + (div//2 if i % 8 == 3 else 0), div // 4)
+        p = pitch_into_range(n.pitch, 52, 82)
+        if harmony_lock:
+            p = sanitize_copied_pitch(p, 52, 82, st, roots, scale, chord_bias=0.46)
+        dur = max(div//6, int(n.duration * 0.72))
+        add_note(echo, 8, p, st, min(dur, song_end-st), n.vel * 0.30)
+    echo.append(make_meta(song_end, 0x2F, b"", order=99)); new_tracks.append(echo)
+
+    drums = setup_track("GRIDLOCK SYNTH DRUMS", ch=9, program=None, volume=122, pan=64, reverb=18, chorus=4)
+    start_drum = 2 * bar
+    for bs in range(start_drum, song_end, bar):
+        bar_i = bs // bar
+        for beat in range(4):
+            add_note(drums, 9, 36, bs + beat * div, 42, 108 if beat == 0 else 96)
+        if bar_i % 4 in (1, 3) and intensity > 0.4:
+            add_note(drums, 9, 36, bs + 3*div + div//2, 36, 72)
+        for beat in (1, 3):
+            add_note(drums, 9, 38, bs + beat*div, 50, 100)
+            add_note(drums, 9, 39, bs + beat*div + 10, 48, 58)
+        for e8 in range(8):
+            swing = hat_swing if e8 % 2 == 1 else 0
+            add_note(drums, 9, 42, bs + e8*(div//2) + swing, 28, 52 + ((20 + fill_variant) if e8 % 2 == 0 else 0))
+        if intensity > 0.45:
+            add_note(drums, 9, 46, bs + 2*div + div//2 + div//16, 55, 58)
+        if bar_i % 16 == 0:
+            add_note(drums, 9, 49, bs, div, 68)
+        if bar_i % 8 == (7 - fill_variant % 2):
+            for k, note in enumerate([47, 45, 43, 41]):
+                add_note(drums, 9, note, bs + 3*div + k*(div//4), 52, 76-k*5)
+    drums.append(make_meta(song_end, 0x2F, b"", order=99)); new_tracks.append(drums)
+
+    reset = [make_meta(0, 0x03, b"RESET/SYSEX", order=0), make_meta(song_end, 0x2F, b"", order=99)]
+    new_tracks.append(reset)
+
+    out_mid.parent.mkdir(parents=True, exist_ok=True)
+    write_midi(out_mid, 1, div, new_tracks)
+    log(progress, f"MIDI geschrieben: {out_mid}")
+    return out_mid, analysis
+
+# -----------------------------
+# Built-in WAV renderer
+# -----------------------------
+def midi_to_freq(note: int) -> float:
+    return 440.0 * (2.0 ** ((note - 69) / 12.0))
+
+
+def parse_tempo(mid: Path):
+    fmt, ntr, div, tracks = parse_midi(mid)
+    tempo = 500000
+    for t in tracks:
+        for e in t.events:
+            if e.type == "meta" and e.meta_type == 0x51 and len(e.data) == 3:
+                tempo = int.from_bytes(e.data, "big")
+                return fmt, ntr, div, tracks, tempo
+    return fmt, ntr, div, tracks, tempo
+
+
+def collect_notes_for_render(mid: Path, progress: Progress | None = None):
+    fmt, ntr, div, tracks, tempo = parse_tempo(mid)
+    log(progress, f"[35%] Audio render: parsed {len(tracks)} track(s). Collecting notes...")
+    end_tick = max([0] + [e.abs_tick for t in tracks for e in t.events])
+    sp_tick = (tempo / 1_000_000.0) / div
+    notes = []
+    programs = defaultdict(lambda: 0)
+    volumes = defaultdict(lambda: 100)
+    pans = defaultdict(lambda: 64)
+    for ti, t in enumerate(tracks):
+        stacks = defaultdict(list)
+        for e in t.events:
+            if e.status is None or e.channel is None:
+                continue
+            hi = e.status & 0xF0
+            ch = e.channel
+            if hi == 0xC0 and e.data:
+                programs[ch] = e.data[0]
+            elif hi == 0xB0 and len(e.data) >= 2:
+                if e.data[0] == 7:
+                    volumes[ch] = e.data[1]
+                elif e.data[0] == 10:
+                    pans[ch] = e.data[1]
+            elif hi == 0x90 and len(e.data) >= 2 and e.data[1] > 0:
+                stacks[(ch, e.data[0])].append((e.abs_tick, e.data[1], programs[ch], volumes[ch], pans[ch]))
+            elif (hi == 0x80 and len(e.data) >= 2) or (hi == 0x90 and len(e.data) >= 2 and e.data[1] == 0):
+                key = (ch, e.data[0])
+                if stacks[key]:
+                    st, vel, prog, vol, pan = stacks[key].pop(0)
+                    if e.abs_tick > st:
+                        notes.append({
+                            "start": st * sp_tick,
+                            "dur": max(0.025, (e.abs_tick - st) * sp_tick),
+                            "pitch": e.data[0], "vel": vel, "ch": ch, "program": prog, "vol": vol, "pan": pan,
+                            "track": ti,
+                        })
+    duration = end_tick * sp_tick + 2.0
+    return notes, duration
+
+
+def envelope(n: int, sr: int, attack=0.008, decay=0.05, sustain=0.7, release=0.04):
+    import numpy as np
+    if n <= 0:
+        return np.zeros(0, dtype=np.float32)
+    a = min(n, int(attack * sr))
+    d = min(max(0, n-a), int(decay * sr))
+    r = min(max(0, n-a-d), int(release * sr))
+    s = max(0, n-a-d-r)
+    parts = []
+    if a:
+        parts.append(np.linspace(0, 1, a, endpoint=False, dtype=np.float32))
+    if d:
+        parts.append(np.linspace(1, sustain, d, endpoint=False, dtype=np.float32))
+    if s:
+        parts.append(np.full(s, sustain, dtype=np.float32))
+    if r:
+        parts.append(np.linspace(sustain, 0, r, endpoint=True, dtype=np.float32))
+    if not parts:
+        return np.ones(n, dtype=np.float32)
+    env = np.concatenate(parts)
+    if len(env) < n:
+        env = np.pad(env, (0, n-len(env)), constant_values=0)
+    return env[:n]
+
+
+def softclip(x):
+    import numpy as np
+    return np.tanh(x)
+
+
+def synth_note(note, sr: int):
+    import numpy as np
+    ch = note["ch"]
+    pitch = note["pitch"]
+    dur = note["dur"]
+    vel = note["vel"] / 127.0
+    vol = note["vol"] / 127.0
+    amp = vel * vol
+    n = max(1, int((dur + 0.08) * sr))
+    t = np.arange(n, dtype=np.float32) / sr
+    f = midi_to_freq(pitch)
+    phase = 2*np.pi*f*t
+
+    if ch == 9:
+        if pitch == 36:
+            n2 = max(1, int(0.42 * sr)); t2 = np.arange(n2, dtype=np.float32)/sr
+            freq = 95*np.exp(-t2*22) + 38
+            phase2 = 2*np.pi*np.cumsum(freq)/sr
+            wave = np.sin(phase2) * np.exp(-t2*9.5)
+            wave += 0.25*np.random.default_rng(1000+pitch+n2).normal(0,1,n2)*np.exp(-t2*45)
+            return wave.astype(np.float32) * amp * 1.15
+        if pitch in (38,39):
+            n2 = max(1, int(0.34 * sr)); t2 = np.arange(n2, dtype=np.float32)/sr
+            rng = np.random.default_rng(2000+pitch+n2)
+            noise = rng.normal(0,1,n2)
+            tone = np.sin(2*np.pi*185*t2) * np.exp(-t2*14)
+            wave = (0.65*noise*np.exp(-t2*17) + 0.35*tone)
+            if pitch == 39:
+                wave *= (1 + 0.35*np.sin(2*np.pi*34*t2))
+            return wave.astype(np.float32) * amp * 0.72
+        if pitch in (42,46,49):
+            n2 = max(1, int((0.08 if pitch==42 else 0.38 if pitch==46 else 1.1)*sr)); t2 = np.arange(n2, dtype=np.float32)/sr
+            rng = np.random.default_rng(3000+pitch+n2)
+            noise = rng.normal(0,1,n2)
+            smooth = np.convolve(noise, np.ones(16)/16, mode='same')
+            wave = (noise - smooth) * np.exp(-t2*(38 if pitch==42 else 7 if pitch==46 else 2.2))
+            return wave.astype(np.float32) * amp * (0.23 if pitch==42 else 0.30)
+        n2 = max(1, int(0.28*sr)); t2 = np.arange(n2, dtype=np.float32)/sr
+        base = {47:190,45:155,43:125,41:95}.get(pitch, 160)
+        wave = np.sin(2*np.pi*(base*np.exp(-t2*3.5))*t2) * np.exp(-t2*8)
+        return wave.astype(np.float32) * amp * 0.58
+
+    if ch == 1:
+        wave = 0.58*np.tanh(2.2*np.sin(phase)) + 0.32*np.sin(phase*0.5)
+        env = envelope(n, sr, attack=0.004, decay=0.04, sustain=0.62, release=0.035)
+        wave *= env * 0.55
+    elif ch == 2:
+        wave = np.sin(phase + 1.8*np.sin(2*phase)*np.exp(-t*7.0)) + 0.22*np.sin(2*phase)
+        env = envelope(n, sr, attack=0.003, decay=0.18, sustain=0.12, release=0.055)
+        wave *= env * 0.34
+    elif ch == 3:
+        wave = np.sin(phase) + 0.35*np.sin(2.01*phase) + 0.18*np.sin(3.02*phase)
+        env = envelope(n, sr, attack=0.006, decay=0.22, sustain=0.22, release=0.09)
+        wave *= env * 0.24
+    elif ch == 4:
+        wave = np.sin(phase) + 0.22*np.sin(3*phase)
+        env = envelope(n, sr, attack=0.001, decay=0.035, sustain=0.08, release=0.025)
+        wave *= env * 0.13
+    elif ch == 5:
+        det = 0.006
+        wave = 0.42*np.sin(phase) + 0.22*np.sin(2*np.pi*f*(1+det)*t) + 0.22*np.sin(2*np.pi*f*(1-det)*t)
+        wave += 0.08*np.sin(2*phase)
+        env = envelope(n, sr, attack=0.25, decay=0.22, sustain=0.82, release=0.35)
+        wave *= env * 0.28
+    elif ch == 6:
+        vibr = 0.003*np.sin(2*np.pi*5.2*t)
+        wave = 0.48*np.tanh(1.7*np.sin(phase*(1+vibr))) + 0.24*np.sin(phase) + 0.12*np.sin(2*phase)
+        env = envelope(n, sr, attack=0.012, decay=0.08, sustain=0.72, release=0.075)
+        wave *= env * 0.36
+    elif ch == 7:
+        wave = 0.35*np.tanh(2.0*np.sin(phase)) + 0.28*np.sin(phase) + 0.10*np.sin(2*phase)
+        env = envelope(n, sr, attack=0.01, decay=0.08, sustain=0.56, release=0.07)
+        wave *= env * 0.30
+    elif ch == 8:
+        frac = (f*t) % 1.0
+        saw = 2*frac - 1
+        wave = 0.22*saw + 0.30*np.sin(phase)
+        env = envelope(n, sr, attack=0.01, decay=0.10, sustain=0.48, release=0.085)
+        wave *= env * 0.21
+    else:
+        wave = np.sin(phase) * envelope(n, sr) * 0.2
+    return (wave.astype(np.float32) * amp)
+
+
+def render_wav(mid: Path | str, wav_path: Path | str, sr: int = 44100, progress: Progress | None = None):
+    import numpy as np
+    mid = Path(mid); wav_path = Path(wav_path)
+    random.seed(20260527)
+    np.random.seed(20260527)
+    notes, duration = collect_notes_for_render(mid, progress=progress)
+    total = int(duration * sr)
+    mix = np.zeros((total, 2), dtype=np.float32)
+    log(progress, f"[45%] Rendere WAV mit internem Synth: {len(notes)} Noten, ca. {duration:.1f}s")
+    for idx, note in enumerate(notes):
+        if progress and idx and idx % 250 == 0:
+            pct = 45 + int((idx / max(1, len(notes))) * 40)
+            log(progress, f"[{pct}%] Audio: {idx}/{len(notes)} Noten")
+        audio = synth_note(note, sr)
+        start = int(note["start"] * sr)
+        end = min(total, start + len(audio))
+        if end <= start:
+            continue
+        audio = audio[:end-start]
+        pan = note["pan"] / 127.0
+        left = math.cos(pan * math.pi/2)
+        right = math.sin(pan * math.pi/2)
+        mix[start:end, 0] += audio * left
+        mix[start:end, 1] += audio * right
+    for delay, amount in ((0.28, 0.16), (0.43, 0.08)):
+        delay_s = int(delay * sr)
+        if delay_s < total:
+            mix[delay_s:] += mix[:-delay_s] * amount
+    fade_len = min(total, int(2.0 * sr))
+    if fade_len:
+        fade = np.linspace(1.0, 0.0, fade_len, dtype=np.float32)
+        mix[-fade_len:] *= fade[:, None]
+    peak = float(np.max(np.abs(mix))) if total else 1.0
+    if peak > 0:
+        mix = mix / max(peak, 1.0) * 0.92
+    mix = softclip(mix * 1.15) * 0.88
+    out = np.int16(np.clip(mix, -1, 1) * 32767)
+    wav_path.parent.mkdir(parents=True, exist_ok=True)
+    with wave.open(str(wav_path), "wb") as wf:
+        wf.setnchannels(2)
+        wf.setsampwidth(2)
+        wf.setframerate(sr)
+        wf.writeframes(out.tobytes())
+    log(progress, f"[88%] WAV geschrieben: {wav_path}")
+    return wav_path
+
+
+def _is_real_ffmpeg(exe: str | Path) -> bool:
+    try:
+        proc = subprocess.run([str(exe), "-version"], text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=5)
+        head = (proc.stdout or "").lower()[:300]
+        return proc.returncode == 0 and "ffmpeg version" in head
+    except Exception:
+        return False
+
+
+def find_usable_ffmpeg(base_dir: Path | None = None) -> str | None:
+    candidates: list[str] = []
+    env = os.environ.get("SYNTHWAVE_FFMPEG")
+    if env:
+        candidates.append(env)
+    if base_dir:
+        for rel in [
+            "tools/ffmpeg/bin/ffmpeg.exe",
+            "tools/ffmpeg/ffmpeg.exe",
+            "portable_ffmpeg/ffmpeg.exe",
+            "ffmpeg.exe",
+        ]:
+            candidates.append(str(base_dir / rel))
+    found = shutil.which("ffmpeg")
+    if found:
+        candidates.append(found)
+    # Avoid fake Python package shims named ffmpeg.exe by actively validating -version.
+    seen = set()
+    for c in candidates:
+        if not c or c in seen:
+            continue
+        seen.add(c)
+        if Path(c).exists() or shutil.which(c):
+            if _is_real_ffmpeg(c):
+                return c
+    return None
+
+
+def convert_mp3(wav_path: Path | str, mp3_path: Path | str, base_dir: Path | None = None, progress: Progress | None = None):
+    wav_path = Path(wav_path); mp3_path = Path(mp3_path)
+    ffmpeg = find_usable_ffmpeg(base_dir)
+    if not ffmpeg:
+        log(progress, "MP3 übersprungen: kein echtes ffmpeg gefunden. WAV ist trotzdem fertig.")
+        return None
+    cmd = [ffmpeg, "-y", "-i", str(wav_path), "-codec:a", "libmp3lame", "-b:a", "192k", str(mp3_path)]
+    try:
+        subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        log(progress, f"MP3 geschrieben: {mp3_path}")
+        return mp3_path
+    except subprocess.CalledProcessError as exc:
+        msg = (exc.stderr or exc.stdout or str(exc)).strip()
+        log(progress, f"MP3-Konvertierung fehlgeschlagen, WAV bleibt nutzbar: {msg[:500]}")
+        return None
+
+
+def process_file(
+    source: Path | str,
+    output_dir: Path | str | None = None,
+    prefix: str | None = None,
+    render_audio: bool = True,
+    render_mp3: bool = True,
+    sample_rate: int = 44100,
+    intensity: float = 0.65,
+    harmony_lock: bool = True,
+    seed: int | None = None,
+    progress: Progress | None = None,
+) -> dict:
+    source = Path(source)
+    seed = normalize_seed(seed)
+    if output_dir is None:
+        output_dir = source.parent / "reimagined_output"
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    if prefix is None or not prefix.strip():
+        prefix = f"{source.stem}_reimagined_synthwave_seed{seed}"
+    safe_prefix = "".join(ch if ch.isalnum() or ch in "-_. " else "_" for ch in prefix).strip() or "reimagined_synthwave"
+    mid = output_dir / f"{safe_prefix}.mid"
+    wav = output_dir / f"{safe_prefix}.wav"
+    mp3 = output_dir / f"{safe_prefix}.mp3"
+    analysis_txt = output_dir / f"{safe_prefix}_analysis.txt"
+    midi_path, analysis = build_reimagined_midi(source, mid, intensity=intensity, harmony_lock=harmony_lock, seed=seed, progress=progress)
+    tonic, mode, scale, key_confidence = detect_key_and_mode(analysis)
+    generation_summary = (
+        "Generation settings:\n"
+        f"  Seed: {seed}\n"
+        f"  Harmony lock: {'ON' if harmony_lock else 'OFF'}\n"
+        f"  Detected key/mode: {NOTE_NAMES[tonic]} {mode} (confidence {key_confidence:.2f})\n"
+        f"  Intensity: {intensity:.2f}\n"
+        f"  Sample rate: {sample_rate}\n\n"
+    )
+    full_summary = generation_summary + analysis.summary
+    analysis_txt.write_text(full_summary, encoding="utf-8")
+    log(progress, f"Analyse gespeichert: {analysis_txt}")
+    wav_path = None
+    mp3_path = None
+    if render_audio:
+        wav_path = render_wav(midi_path, wav, sr=sample_rate, progress=progress)
+        if render_mp3:
+            mp3_path = convert_mp3(wav_path, mp3, base_dir=Path(__file__).resolve().parents[1], progress=progress)
+    return {
+        "midi": str(midi_path),
+        "wav": str(wav_path) if wav_path else None,
+        "mp3": str(mp3_path) if mp3_path else None,
+        "analysis": str(analysis_txt),
+        "seed": seed,
+        "summary": full_summary,
+    }
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(description="Analyze a MIDI, create a cleaner synthwave-inspired variation, render WAV and optional MP3.")
+    ap.add_argument("source", help="Input .mid/.midi file")
+    ap.add_argument("--out-dir", default=None, help="Output directory")
+    ap.add_argument("--prefix", default=None, help="Output filename prefix")
+    ap.add_argument("--no-audio", action="store_true", help="Only write MIDI and analysis")
+    ap.add_argument("--no-mp3", action="store_true", help="Skip MP3 conversion")
+    ap.add_argument("--sample-rate", type=int, default=44100, help="WAV sample rate")
+    ap.add_argument("--intensity", type=float, default=0.65, help="Transformation intensity 0.0-1.0")
+    ap.add_argument("--no-harmony-lock", action="store_true", help="Disable scale/chord correction. Default keeps copied notes harmonically locked.")
+    ap.add_argument("--seed", type=int, default=None, help="Reproducible generation seed. Omit for a new random seed each run.")
+    args = ap.parse_args(argv)
+    result = process_file(
+        args.source,
+        output_dir=args.out_dir,
+        prefix=args.prefix,
+        render_audio=not args.no_audio,
+        render_mp3=not args.no_mp3,
+        sample_rate=args.sample_rate,
+        intensity=max(0.0, min(1.0, args.intensity)),
+        harmony_lock=not args.no_harmony_lock,
+        seed=args.seed,
+        progress=print,
+    )
+    print(json.dumps(result, indent=2, ensure_ascii=False))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
