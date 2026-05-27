@@ -1,5 +1,7 @@
 # Synthwave MIDI Reimaginer GUI
 
+<img width="1183" height="811" alt="Synthwave_Midi_Reimaginer" src="https://github.com/user-attachments/assets/0703af27-d0e1-4706-9d0f-7352fecc7eaa" />
+
 ## v0.1.5 notes
 
 This build fixes the seed controls after playback/rendering. The Seed field and **New Seed** button now stay usable. Auto Seed is enabled by default, so every render creates a different version. The exact seed is written into the output analysis TXT and embedded in the MIDI metadata. To reproduce a result, disable Auto Seed and enter the saved seed manually, or edit/click New Seed which automatically switches to manual seed mode.
