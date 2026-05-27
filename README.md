@@ -24,7 +24,6 @@ The installer creates a local `.venv` folder. After the first successful setup, 
 - `prepare_wheelhouse_online.bat` - downloads dependency wheels for future offline reinstall
 - `run_cli_example.bat` - command-line example using `examples/test.mid`
 - `legacy/make_fixed_synthwave_v2.py` - the previous manual script for reference
-- `examples/test.mid` - the test MIDI used during development
 
 ## Offline reinstall / wheelhouse mode
 
