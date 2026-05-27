@@ -1,16 +1,8 @@
 # Synthwave MIDI Reimaginer GUI
 
+Reimaginer any midi song you like. With Parameter, Midi, WAV, MP3 output for any random or reproduceable seed you set. 
+
 <img width="1183" height="811" alt="Synthwave_Midi_Reimaginer" src="https://github.com/user-attachments/assets/0703af27-d0e1-4706-9d0f-7352fecc7eaa" />
-
-## v0.1.5 notes
-
-This build fixes the seed controls after playback/rendering. The Seed field and **New Seed** button now stay usable. Auto Seed is enabled by default, so every render creates a different version. The exact seed is written into the output analysis TXT and embedded in the MIDI metadata. To reproduce a result, disable Auto Seed and enter the saved seed manually, or edit/click New Seed which automatically switches to manual seed mode.
-
-Harmony Lock should normally stay ON. It detects a likely key/mode, builds ordered scale degrees, and snaps copied bass/lead/arp/pad material to compatible scale/chord tones to reduce clashes between tracks. v0.1.5
-
-A small offline-friendly PyQt6 desktop tool that analyzes a MIDI file, creates a cleaner synthwave-inspired derivative version, and optionally renders a WAV/MP3 preview with an internal Python synthesizer.
-
-The tool was built from the previous `make_fixed_synthwave_v2.py` idea, but the new version is more generic: it no longer assumes that a specific track number is the bad high synth. It analyzes each MIDI and tries to detect roles like bass, lead/hook, arp/pluck, pad source, drums, and high/problematic material.
 
 ## Start on Windows
 
