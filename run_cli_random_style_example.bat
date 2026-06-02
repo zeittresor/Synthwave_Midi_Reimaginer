@@ -2,5 +2,5 @@
 setlocal EnableExtensions
 cd /d "%~dp0"
 if not exist ".venv\Scripts\python.exe" call install_windows.bat
-".venv\Scripts\python.exe" "app\midi_reimaginer_core.py" "examples\test.mid" --out-dir "output" --random-style --seed 123456 --no-mp3
+".venv\Scripts\python.exe" "app\midi_reimaginer_core.py" "examples\test.mid" --out-dir "output" --random-style --seed 123456 --bpm 128 --repetition 0.35 --intensity 0.80 --use-style-instruments --no-mp3
 pause

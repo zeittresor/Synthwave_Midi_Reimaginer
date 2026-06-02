@@ -1,42 +1,47 @@
-# Synthwave MIDI Reimaginer GUI v0.2.2
+# Synthwave MIDI Reimaginer GUI v0.2.3
 
 Offline-friendly MIDI analysis, style-based re-arrangement and built-in WAV rendering.
 
 ## What this tool does
 
-The app analyzes a source `.mid` / `.midi` file, detects likely track roles such as bass, lead, arp, pad/problem-hook and drums, then creates a new derivative electronic version using a selectable style preset.
+The app analyzes a source `.mid` / `.midi` file, detects likely track roles such as bass, lead, arp, pad/problem-hook and drums, then creates a new derivative version using a selectable style preset.
 
-It can also render a WAV preview internally, so the result does not depend on the Windows MIDI wavetable. MP3 export is optional and only runs when a usable `ffmpeg.exe` is found.
+It can render a WAV preview internally, so the result does not depend on the Windows MIDI wavetable. MP3 export is optional and only runs when a usable `ffmpeg.exe` is found.
 
-## New in v0.2.2
+## New in v0.2.3
 
-### Stronger Transformation Intensity
+### Three main generation sliders
 
-The `Transformation intensity` slider now has a broader musical range:
+The render section now has three musical sliders:
 
-- `0%` = close to source MIDI / cleanup-oriented output
-- `50%` = recognizable source material with a stronger selected-style arrangement
-- `100%` = mostly regenerated song in the selected style, while still using source key and structure as a guide
+- **Transformation intensity**
+  - `0%` = close to source MIDI / cleanup-oriented output
+  - `50%` = recognizable source material with a stronger selected-style arrangement
+  - `100%` = mostly regenerated song in the selected style, while still using source key and structure as a guide
 
-The slider now affects tempo pull, source-note survival, bass pattern generation, arp density, hook composition, lead mutation, pad voicing, support echo and drum variation.
+- **BPM**
+  - Sets the target tempo used in the generated MIDI/WAV.
+  - The slider is initialized from the selected style's BPM range until the user changes it manually.
+  - The selected BPM is written to `_analysis.txt` and is part of reproducible settings.
 
-### Stronger Seed Influence
+- **Repeated note amount**
+  - `0%` = aggressively reduce long monotone same-note loops by skipping or changing repeated notes.
+  - `50%` = balanced motif repetition.
+  - `100%` = preserve/allow repetitive patterns, useful for techno, trance, minimal, chiptune, etc.
 
-The seed now affects the whole arrangement more clearly:
+### More styles
 
-- bass rhythm and generated bassline choices
-- arp sequence templates
-- pad chord inversions and progression rewrites
-- hook motif generation and phrase rhythm
-- lead contour mutations
-- drum fills, ghost kicks and hat variation
-- echo/support-note selection
+The preset library now includes 57 styles total, including 22+ additional non-electronic or hybrid styles such as Darkwave, Occult Ritual, Meditation, Chillout, Classical, Orchestral Score, Traditional Panflute, Symphonic Metal, Metal, Ska, Punk Rock, Pop, Reggae, Dub, Flower Power, 70s Rock, 20s Jazz, Celtic, Bossa Nova, Latin Electro, Cinematic Trailer and Dream Pop.
 
-Same seed + same source MIDI + same settings should reproduce the same files. Different seeds should now create more audibly different versions.
+### Optional style lead/melody instruments
 
-### Style-aware tooltip
+A new checkbox **Use style lead/melody instruments** lets the selected style override the General MIDI programs for generated lead/hook/pluck/echo tracks. It is OFF by default so changing style mainly changes arrangement behavior first. Turn it ON when you want the lead/melody colors to follow the selected style more strongly, e.g. pan flute, brass, guitars, orchestra or choir-like leads.
 
-The `Transformation intensity` tooltip is no longer hardcoded to Synthwave. It updates when you change the style preset or activate Random Style.
+### Seed behavior
+
+`New random seed each render` remains ON by default. Turn it off when you want to reproduce a previous seed exactly.
+
+Same seed + same source MIDI + same style + same BPM + same repetition + same settings should reproduce the same MIDI.
 
 ## Style Presets
 
@@ -75,7 +80,7 @@ A render can create:
 - `.mid` new MIDI arrangement
 - `.wav` internal audio preview
 - `.mp3` optional MP3 export if FFmpeg is available
-- `_analysis.txt` with track analysis, seed, source hash, style, intensity and rewrite amount
+- `_analysis.txt` with track analysis, seed, source hash, style, BPM, repetition, intensity and rewrite amount
 
 ## Windows usage
 

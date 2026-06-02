@@ -29,7 +29,7 @@ if str(APP_DIR) not in sys.path:
 
 import midi_reimaginer_core as core
 
-APP_VERSION = "0.2.2"
+APP_VERSION = "0.2.3"
 
 
 @dataclass
@@ -41,6 +41,9 @@ class JobSettings:
     render_mp3: bool
     sample_rate: int
     intensity: float
+    target_bpm: float
+    repetition: float
+    use_style_instruments: bool
     harmony_lock: bool
     seed: int | None
     style_id: str
@@ -86,6 +89,9 @@ class RenderWorker(QObject):
                 render_mp3=s.render_mp3,
                 sample_rate=s.sample_rate,
                 intensity=s.intensity,
+                target_bpm=s.target_bpm,
+                repetition=s.repetition,
+                use_style_instruments=s.use_style_instruments,
                 harmony_lock=s.harmony_lock,
                 seed=s.seed,
                 style_id=s.style_id,
@@ -105,6 +111,8 @@ class MainWindow(QMainWindow):
         self.last_result: dict | None = None
         self.worker_thread: QThread | None = None
         self.worker: QObject | None = None
+        self._bpm_user_overridden = False
+        self._updating_bpm_programmatically = False
         self._build_ui()
         self._apply_dark_theme()
         self._log("Ready. Select a MIDI file, analyze it, then render a new version.")
@@ -207,6 +215,23 @@ class MainWindow(QMainWindow):
         self.intensity_slider.setToolTip("Transformation strength. 0% = close to the source/cleanup only. 100% = mostly regenerated song in the selected style.")
         self.intensity_label = QLabel("65%")
         self.intensity_slider.valueChanged.connect(self._intensity_changed)
+
+        self.bpm_slider = QSlider(Qt.Orientation.Horizontal)
+        self.bpm_slider.setRange(40, 220)
+        self.bpm_slider.setValue(124)
+        self.bpm_label = QLabel("124 BPM")
+        self.bpm_slider.valueChanged.connect(self._bpm_changed)
+
+        self.repetition_slider = QSlider(Qt.Orientation.Horizontal)
+        self.repetition_slider.setRange(0, 100)
+        self.repetition_slider.setValue(45)
+        self.repetition_label = QLabel("45%")
+        self.repetition_slider.valueChanged.connect(self._repetition_changed)
+
+        self.use_style_instruments_cb = QCheckBox("Use style lead/melody instruments")
+        self.use_style_instruments_cb.setChecked(False)
+        self.use_style_instruments_cb.setToolTip("Default OFF. When enabled, generated lead/hook/pluck/echo tracks use the selected style's recommended General MIDI instruments. When off, the arrangement changes but melody colors stay in a stable synth-friendly set.")
+
         self.theme_combo = QComboBox()
         self.theme_combo.addItems(["Dark", "Light"])
         self.theme_combo.currentTextChanged.connect(lambda t: self._apply_dark_theme() if t == "Dark" else self._apply_light_theme())
@@ -218,14 +243,22 @@ class MainWindow(QMainWindow):
         og.addWidget(QLabel("Transformation intensity:"), 1, 0)
         og.addWidget(self.intensity_slider, 1, 1, 1, 2)
         og.addWidget(self.intensity_label, 1, 3)
-        og.addWidget(self.harmony_lock_cb, 2, 0, 1, 2)
-        og.addWidget(self.auto_seed_cb, 2, 2, 1, 2)
-        og.addWidget(QLabel("Seed:"), 3, 0)
-        og.addWidget(self.seed_spin, 3, 1)
-        og.addWidget(self.new_seed_btn, 3, 2)
-        og.addWidget(QLabel("Theme:"), 3, 3)
-        og.addWidget(self.theme_combo, 3, 4)
+        og.addWidget(QLabel("BPM:"), 2, 0)
+        og.addWidget(self.bpm_slider, 2, 1, 1, 2)
+        og.addWidget(self.bpm_label, 2, 3)
+        og.addWidget(QLabel("Repeated note amount:"), 3, 0)
+        og.addWidget(self.repetition_slider, 3, 1, 1, 2)
+        og.addWidget(self.repetition_label, 3, 3)
+        og.addWidget(self.harmony_lock_cb, 4, 0, 1, 2)
+        og.addWidget(self.auto_seed_cb, 4, 2, 1, 2)
+        og.addWidget(self.use_style_instruments_cb, 5, 0, 1, 2)
+        og.addWidget(QLabel("Seed:"), 5, 2)
+        og.addWidget(self.seed_spin, 5, 3)
+        og.addWidget(self.new_seed_btn, 5, 4)
+        og.addWidget(QLabel("Theme:"), 6, 0)
+        og.addWidget(self.theme_combo, 6, 1)
         main.addWidget(options_group)
+        self._update_style_info()
 
         buttons = QHBoxLayout()
         self.analyze_btn = QPushButton("Analyze MIDI")
@@ -279,9 +312,11 @@ This tool analyzes a MIDI file and creates a cleaned-up derivative electronic ve
 - Detects likely **bass**, **lead/hook**, **arp/pluck**, **pad/chord source**, **drums**, and overly high/problematic tracks.
 - Lets you choose a modular **Style Preset** such as Synthwave, Darksynth, Techno, Drum and Bass, Ambient, Chiptune, etc.
 - Optional **Random Style from seed** mode picks a style reproducibly from the seed.
+- Three main musical sliders: **Transformation Intensity**, **BPM**, and **Repeated note amount**.
+- Optional **Use style lead/melody instruments** applies the selected preset's GM programs to hook/lead/pluck/echo tracks.
 - Quantizes musical parts to a cleaner grid.
 - Detects a likely key/scale and, with **Harmony lock**, snaps copied notes to compatible scale/chord tones.
-- Uses a reproducible **seed**. Auto mode chooses a new seed for every render; manual mode repeats the same version exactly.
+- Uses a reproducible **seed**. Auto mode is ON by default and chooses a new seed for every render; manual mode repeats the same version exactly.
 - Moves squeaky high hook material into a more usable mid-range.
 - Adds warm pad support, grid-locked synthwave drums, and a deterministic internal audio preview render.
 
@@ -298,7 +333,7 @@ MP3 export requires a **real ffmpeg binary**. The tool validates `ffmpeg -versio
 - `.mid` new MIDI arrangement
 - `.wav` internal synth preview
 - `.mp3` optional ffmpeg conversion
-- `_analysis.txt` text report of the detected MIDI structure, seed, source hash, requested style and resolved style
+- `_analysis.txt` text report of the detected MIDI structure, seed, source hash, BPM, repetition amount, requested style and resolved style
 
 ## Modular style files
 
@@ -374,11 +409,56 @@ The selectable styles live in `app/styles/style_presets.json`. A human-readable 
             f"{mode}{style.get('info', '')} | BPM {style.get('bpm_min', '?')}-{style.get('bpm_max', '?')} | "
             f"Drums: {style.get('drum_feel', '?')} | Instruments: {style.get('instruments', '')}"
         )
+        # Before the user touches BPM, style changes move the BPM slider to the
+        # center of the preset's useful range. After manual movement, respect it.
+        if hasattr(self, "bpm_slider") and not getattr(self, "_bpm_user_overridden", False):
+            try:
+                bpm = int(round((float(style.get("bpm_min", 100)) + float(style.get("bpm_max", 130))) / 2.0))
+            except Exception:
+                bpm = 124
+            self._updating_bpm_programmatically = True
+            try:
+                self.bpm_slider.setValue(max(self.bpm_slider.minimum(), min(self.bpm_slider.maximum(), bpm)))
+            finally:
+                self._updating_bpm_programmatically = False
         self._update_intensity_tooltip()
+        self._update_bpm_tooltip()
+        self._update_repetition_tooltip()
 
     def _intensity_changed(self, value: int):
         self.intensity_label.setText(f"{value}%")
         self._update_intensity_tooltip()
+
+    def _bpm_changed(self, value: int):
+        self.bpm_label.setText(f"{value} BPM")
+        if not getattr(self, "_updating_bpm_programmatically", False):
+            self._bpm_user_overridden = True
+        self._update_bpm_tooltip()
+
+    def _repetition_changed(self, value: int):
+        self.repetition_label.setText(f"{value}%")
+        self._update_repetition_tooltip()
+
+    def _update_bpm_tooltip(self):
+        if not hasattr(self, "bpm_slider"):
+            return
+        style = self._style_by_id(self._selected_style_id())
+        self.bpm_slider.setToolTip(
+            f"Target tempo for the generated MIDI/WAV. Current: {self.bpm_slider.value()} BPM.\n"
+            f"Selected style range: {style.get('bpm_min', '?')}-{style.get('bpm_max', '?')} BPM.\n"
+            "The slider is written into the analysis TXT and is part of reproducible generation settings."
+        )
+
+    def _update_repetition_tooltip(self):
+        if not hasattr(self, "repetition_slider"):
+            return
+        value = self.repetition_slider.value()
+        self.repetition_slider.setToolTip(
+            f"Controls how much repeated same-note material is allowed. Current: {value}%.\n"
+            "0% = aggressively reduce long monotone same-note loops by skipping or changing repeated notes.\n"
+            "50% = balanced; some motif repetition remains, annoying loops are softened.\n"
+            "100% = preserve/allow repetitive patterns, useful for techno, trance, minimal, chiptune, etc."
+        )
 
     def _update_intensity_tooltip(self):
         if not hasattr(self, "intensity_slider"):
@@ -508,6 +588,9 @@ The selectable styles live in `app/styles/style_presets.json`. A human-readable 
             render_mp3=self.render_mp3_cb.isChecked(),
             sample_rate=int(self.sample_rate.currentText()),
             intensity=self.intensity_slider.value() / 100.0,
+            target_bpm=float(self.bpm_slider.value()),
+            repetition=self.repetition_slider.value() / 100.0,
+            use_style_instruments=self.use_style_instruments_cb.isChecked(),
             harmony_lock=self.harmony_lock_cb.isChecked(),
             seed=seed,
             style_id=self._selected_style_id(),
@@ -519,7 +602,7 @@ The selectable styles live in `app/styles/style_presets.json`. A human-readable 
         if not settings:
             return
         self._set_busy(True)
-        self._log(f"Rendering new version from {settings.source.name} with seed {settings.seed}, style {settings.style_id}{' (random)' if settings.random_style else ''} ...")
+        self._log(f"Rendering new version from {settings.source.name} with seed {settings.seed}, style {settings.style_id}{' (random)' if settings.random_style else ''}, BPM {settings.target_bpm:.0f}, repetition {settings.repetition:.2f} ...")
         self.worker_thread = QThread(self)
         worker = RenderWorker(settings)
         self.worker = worker  # keep a strong Python reference while the thread is running

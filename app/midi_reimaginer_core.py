@@ -121,7 +121,7 @@ def normalize_seed(seed: int | str | None) -> int:
 # -----------------------------
 # Modular style presets
 # -----------------------------
-STYLE_PRESET_VERSION = 1
+STYLE_PRESET_VERSION = 2
 
 
 def _styles_dir() -> Path:
@@ -250,6 +250,37 @@ def style_program(style: dict, role: str, default: int) -> int:
         return max(0, min(127, int(programs.get(role, default))))
     except Exception:
         return default
+
+
+# Stable General MIDI defaults. Style presets can override lead/melody programs
+# only when the user explicitly enables the GUI option. This avoids a selected
+# non-electronic style suddenly making every generated lead instrument sound
+# wildly different unless requested.
+STANDARD_PROGRAMS = {
+    "bass": 38,     # Synth Bass 1
+    "pluck": 5,    # Electric Piano 2 / plucky neutral
+    "vibe": 11,    # Vibraphone
+    "ticks": 115,  # Woodblock
+    "pad": 89,     # Warm Pad
+    "hook": 80,    # Square Lead
+    "lead": 81,    # Saw Lead
+    "echo": 88,    # New Age Pad
+}
+
+MELODY_PROGRAM_ROLES = {"pluck", "vibe", "ticks", "hook", "lead", "echo"}
+
+
+def resolved_program(style: dict, role: str, default: int, *, use_style_instruments: bool = False) -> int:
+    """Return a GM program for a generated track.
+
+    Bass/pad follow the style by default because they are part of the arrangement
+    bed. Lead/melody colors are optional so the user can keep a stable synthy
+    sound while still changing rhythm/harmony/style parameters.
+    """
+    base = STANDARD_PROGRAMS.get(role, default)
+    if role in MELODY_PROGRAM_ROLES and not use_style_instruments:
+        return max(0, min(127, int(base)))
+    return style_program(style, role, base)
 
 
 def source_midi_hash(path: Path | str) -> str:
@@ -871,6 +902,78 @@ def maybe_mutate_pitch(
     return sanitize_copied_pitch(p, lo, hi, tick, roots, scale, chord_bias=chord_bias)
 
 
+
+def de_repeat_pitch_or_skip(
+    state: dict[str, tuple[int, int]],
+    role: str,
+    pitch: int,
+    tick: int,
+    lo: int,
+    hi: int,
+    roots: list[tuple[int, int]],
+    scale: list[int],
+    rng: random.Random,
+    repetition: float,
+    rewrite: float,
+) -> int | None:
+    """Reduce annoying long runs of the same pitch.
+
+    repetition=1.0 preserves/encourages looping. repetition=0.0 allows only
+    short repeated runs, then either skips the note or moves it to a nearby
+    scale/chord tone. This is deliberately deterministic from the seed because
+    the same seed must reproduce the same anti-monotony decisions.
+    """
+    repetition = clamp01(repetition)
+    if repetition >= 0.985:
+        return pitch_into_range(pitch, lo, hi)
+    p = pitch_into_range(pitch, lo, hi)
+    last_pitch, run_len = state.get(role, (-999, 0))
+    same = (p == last_pitch) or ((p % 12) == (last_pitch % 12) and abs(p - last_pitch) <= 12)
+    run_len = run_len + 1 if same else 1
+    allowed = 1 + int(round(repetition * 8.0))
+    if same and run_len > allowed:
+        pressure = clamp01((run_len - allowed) / 6.0)
+        change_prob = clamp01((1.0 - repetition) * (0.55 + 0.35 * rewrite + 0.25 * pressure))
+        skip_prob = clamp01((1.0 - repetition) * (0.18 + 0.24 * pressure) * (0.5 + 0.5 * rewrite))
+        if rng.random() < skip_prob:
+            state[role] = (last_pitch, run_len)
+            return None
+        if rng.random() < change_prob:
+            root = active_root_for_tick(tick, roots)
+            current_degree = scale_degree_index(p % 12, scale) if scale else 0
+            offset = rng.choice([-3, -2, -1, 1, 2, 3])
+            p = choose_from_scale_degree(root, scale, current_degree + offset, (lo + hi) // 2 + rng.choice([-7, -3, 0, 3, 7]))
+            p = pitch_into_range(p, lo, hi)
+            run_len = 1
+    state[role] = (p, run_len)
+    return p
+
+
+def add_note_controlled(
+    evs: list[Event],
+    ch: int,
+    pitch: int,
+    start: int,
+    duration: int,
+    vel: int,
+    *,
+    state: dict[str, tuple[int, int]],
+    role: str,
+    lo: int,
+    hi: int,
+    roots: list[tuple[int, int]],
+    scale: list[int],
+    rng: random.Random,
+    repetition: float,
+    rewrite: float,
+) -> bool:
+    p = de_repeat_pitch_or_skip(state, role, pitch, start, lo, hi, roots, scale, rng, repetition, rewrite)
+    if p is None:
+        return False
+    add_note(evs, ch, p, start, duration, vel)
+    return True
+
+
 def build_reimagined_midi(
     src: Path | str,
     out_mid: Path | str,
@@ -878,6 +981,9 @@ def build_reimagined_midi(
     style: str = "synthwave",
     style_preset: dict | None = None,
     intensity: float = 0.65,
+    target_bpm: float | None = None,
+    repetition: float = 0.50,
+    use_style_instruments: bool = False,
     preserve_length: bool = True,
     harmony_lock: bool = True,
     seed: int | None = None,
@@ -887,8 +993,10 @@ def build_reimagined_midi(
     out_mid = Path(out_mid)
     seed = normalize_seed(seed)
     intensity = clamp01(intensity)
+    repetition = clamp01(repetition)
+    rhythmic_variation = 1.0 - repetition
 
-    # v0.2.2: make the slider musically meaningful.
+    # v0.2.2+: make the slider musically meaningful.
     # 0.0 = close to source / cleaned copy, 1.0 = mostly regenerated arrangement in the selected style.
     rewrite = smoothstep01(intensity)
     source_keep = 1.0 - rewrite
@@ -912,7 +1020,9 @@ def build_reimagined_midi(
     log(progress, f"Analysiere MIDI: {src.name}")
     log(progress, f"Generation seed: {seed} / arrangement variant {variant}")
     log(progress, f"Transformation intensity: {intensity:.2f} (source keep {source_keep:.2f}, rewrite {rewrite:.2f})")
+    log(progress, f"Note repetition: {repetition:.2f} (rhythmic variation {rhythmic_variation:.2f})")
     log(progress, f"Style preset: {style_name} ({style_slug})")
+    log(progress, f"Style lead/melody instruments: {'ON' if use_style_instruments else 'OFF'}")
     analysis = analyze_midi(src, progress=progress)
     div = analysis.division
     bar = div * 4
@@ -924,12 +1034,20 @@ def build_reimagined_midi(
     bpm_max = style_float(style_preset, "bpm_max", 132.0, bpm_min + 1.0, 240.0)
     style_mid_bpm = (bpm_min + bpm_max) / 2.0
     tempo_jitter = master_rng.uniform(-4.0, 4.0) * rewrite
-    target_bpm = mix_float(analysis.bpm, style_mid_bpm, rewrite)
-    if rewrite > 0.98:
-        target_bpm += master_rng.uniform(bpm_min - style_mid_bpm, bpm_max - style_mid_bpm) * 0.35
-    target_bpm = max(bpm_min if rewrite > 0.55 else 40.0, min(bpm_max if rewrite > 0.55 else 240.0, target_bpm + tempo_jitter))
-    tempo = int(round(60_000_000 / target_bpm))
-    log(progress, f"Erzeuge neue {style_name}-Version bei ca. {target_bpm:.1f} BPM")
+    if target_bpm is not None:
+        try:
+            target_bpm_value = max(40.0, min(240.0, float(target_bpm)))
+        except Exception:
+            target_bpm_value = style_mid_bpm
+        bpm_source = "user slider"
+    else:
+        target_bpm_value = mix_float(analysis.bpm, style_mid_bpm, rewrite)
+        if rewrite > 0.98:
+            target_bpm_value += master_rng.uniform(bpm_min - style_mid_bpm, bpm_max - style_mid_bpm) * 0.35
+        target_bpm_value = max(bpm_min if rewrite > 0.55 else 40.0, min(bpm_max if rewrite > 0.55 else 240.0, target_bpm_value + tempo_jitter))
+        bpm_source = "source/style/seed"
+    tempo = int(round(60_000_000 / target_bpm_value))
+    log(progress, f"Erzeuge neue {style_name}-Version bei ca. {target_bpm_value:.1f} BPM ({bpm_source})")
 
     # Style parameters are applied gradually by intensity.
     swing_amount = style_float(style_preset, "swing", 0.04, 0.0, 0.25) * (0.10 + 0.90 * rewrite)
@@ -974,12 +1092,23 @@ def build_reimagined_midi(
     hat_swing = int(div * swing_amount) if swing_amount > 0 else 0
     fill_variant = rng_drum.randrange(8)
     copy_grid = div // 8 if intensity < 0.25 else div // 4
-    source_note_probability = max(0.08, 1.0 - 0.88 * rewrite)
+    source_note_probability = max(0.04, (1.0 - 0.88 * rewrite) * mix_float(0.55, 1.0, repetition))
+    # Low repetition values should noticeably suppress long same-note loops,
+    # especially in source-derived arp/lead/tick material.
+    repetition_keep = mix_float(0.42, 1.0, repetition)
+    repeat_state: dict[str, tuple[int, int]] = {}
+
+    def add_mel(evs: list[Event], ch: int, pitch: int, start: int, duration: int, vel: int, role: str, lo: int, hi: int, rng: random.Random) -> bool:
+        return add_note_controlled(
+            evs, ch, pitch, start, duration, vel,
+            state=repeat_state, role=role, lo=lo, hi=hi, roots=roots, scale=scale,
+            rng=rng, repetition=repetition, rewrite=rewrite,
+        )
 
     new_tracks: list[list[Event]] = []
     meta = [
         make_meta(0, 0x03, f"Synthwave MIDI Reimaginer GUI - {style_name}".encode("latin1", errors="replace"), order=0),
-        make_meta(0, 0x01, f"Seed: {seed}; Style: {style_slug}; Variant: {variant}; Intensity: {intensity:.2f}; Rewrite: {rewrite:.2f}; Harmony lock: {'ON' if harmony_lock else 'OFF'}".encode("latin1", errors="replace"), order=1),
+        make_meta(0, 0x01, f"Seed: {seed}; Style: {style_slug}; Variant: {variant}; Intensity: {intensity:.2f}; Rewrite: {rewrite:.2f}; BPM: {target_bpm_value:.1f}; Repetition: {repetition:.2f}; Harmony lock: {'ON' if harmony_lock else 'OFF'}".encode("latin1", errors="replace"), order=1),
         make_meta(0, 0x51, tempo.to_bytes(3, "big"), order=2),
         make_meta(0, 0x58, bytes(analysis.time_signature), order=3),
     ]
@@ -995,7 +1124,7 @@ def build_reimagined_midi(
     bass_src = notes_for_role(analysis, "bass") or [n for n in all_notes if n.pitch < 60] or all_notes[:]
     if not bass_src:
         bass_src = [Note(0, song_end, 48, 90, 1)]
-    bass = setup_track(f"{style_name.upper()} BASS", ch=1, program=style_program(style_preset, "bass", 38), volume=int(104 + distortion * 20), pan=48, reverb=int(8 + reverb_amount * 24), chorus=int(14 + brightness * 18))
+    bass = setup_track(f"{style_name.upper()} BASS", ch=1, program=resolved_program(style_preset, "bass", 38, use_style_instruments=True), volume=int(104 + distortion * 20), pan=48, reverb=int(8 + reverb_amount * 24), chorus=int(14 + brightness * 18))
     for n in bass_src:
         if n.start >= song_end:
             continue
@@ -1008,7 +1137,7 @@ def build_reimagined_midi(
             p = sanitize_copied_pitch(p, bass_lo, bass_hi, st, roots, scale, chord_bias=max(0.75, harmony_strictness))
         if rewrite > 0.35:
             p = maybe_mutate_pitch(p, st, bass_lo, bass_hi, roots, scale, rng_bass, rewrite * 0.55, chord_bias=max(0.80, harmony_strictness))
-        add_note(bass, 1, p, st, min(int(dur * mix_float(0.95, 0.66, rewrite)), song_end - st), n.vel * mix_float(0.90, 0.48, rewrite))
+        add_mel(bass, 1, p, st, min(int(dur * mix_float(0.95, 0.66, rewrite)), song_end - st), n.vel * mix_float(0.90, 0.48, rewrite), "bass", bass_lo, bass_hi, rng_bass)
     if rewrite > 0.10:
         bass_patterns = [
             [0, div, 2*div, 3*div],
@@ -1028,14 +1157,14 @@ def build_reimagined_midi(
                 pc = root if (pi % 4 != 2 or rng_bass.random() > 0.35 * rewrite) else chord_tones_for_root(root, scale)[1]
                 p = nearest_pitch(pc, bass_center + rng_bass.choice([-12, 0, 0, 0]))
                 dur = div//2 if off % div else int(div * mix_float(0.60, 0.82, rewrite))
-                add_note(bass, 1, pitch_into_range(p, bass_lo, bass_hi), bs + off, min(dur, song_end-(bs+off)), 62 + int(46 * rewrite) - pi*2)
+                add_mel(bass, 1, pitch_into_range(p, bass_lo, bass_hi), bs + off, min(dur, song_end-(bs+off)), 62 + int(46 * rewrite) - pi*2, "bass", bass_lo, bass_hi, rng_bass)
     bass.append(make_meta(song_end, 0x2F, b"", order=99)); new_tracks.append(bass)
 
     # -----------------------------
     # Arp / pluck.
     # -----------------------------
     arp_src = notes_for_role(analysis, "arp") or all_notes
-    pluck = setup_track(f"{style_name.upper()} PLUCK / ARP", ch=2, program=style_program(style_preset, "pluck", 5), volume=int(64 + brightness * 30 + rewrite * 8), pan=82, reverb=int(18 + reverb_amount * 48), chorus=int(12 + brightness * 30))
+    pluck = setup_track(f"{style_name.upper()} PLUCK / ARP", ch=2, program=resolved_program(style_preset, "pluck", 5, use_style_instruments=use_style_instruments), volume=int(64 + brightness * 30 + rewrite * 8), pan=82, reverb=int(18 + reverb_amount * 48), chorus=int(12 + brightness * 30))
     skip_mod = max(2, int(round(15 - 10 * arp_density - 4 * rewrite)))
     for i, n in enumerate(arp_src):
         if n.start >= song_end:
@@ -1049,7 +1178,7 @@ def build_reimagined_midi(
         p = pitch_into_range(n.pitch - (12 if n.pitch > arp_hi else 0), arp_lo, arp_hi)
         if harmony_lock:
             p = maybe_mutate_pitch(p, st, arp_lo, arp_hi, roots, scale, rng_arp, rewrite * 0.85, chord_bias=max(0.42, harmony_strictness * 0.72))
-        add_note(pluck, 2, p, st, min(dur, song_end-st), n.vel * mix_float(0.54, 0.34, rewrite))
+        add_mel(pluck, 2, p, st, min(dur, song_end-st), n.vel * mix_float(0.54, 0.34, rewrite), "pluck", arp_lo, arp_hi, rng_arp)
     if rewrite > 0.18:
         steps = 8 if arp_density < 0.70 else 16
         step = div // (4 if steps == 16 else 2)
@@ -1065,14 +1194,14 @@ def build_reimagined_midi(
                 off = s * step + (hat_swing if (s % 2 and steps == 8) else 0)
                 deg = tmpl[(s + variant + bs // bar) % len(tmpl)]
                 p = choose_from_scale_degree(root, scale, deg, (arp_lo + arp_hi)//2 + rng_arp.choice([-12, 0, 0, 12]))
-                add_note(pluck, 2, pitch_into_range(p, arp_lo, arp_hi), bs + off, min(max(24, int(step * 0.58)), song_end-(bs+off)), 40 + int(44 * rewrite) + (s % 3)*4)
+                add_mel(pluck, 2, pitch_into_range(p, arp_lo, arp_hi), bs + off, min(max(24, int(step * 0.58)), song_end-(bs+off)), 40 + int(44 * rewrite) + (s % 3)*4, "pluck", arp_lo, arp_hi, rng_arp)
     pluck.append(make_meta(song_end, 0x2F, b"", order=99)); new_tracks.append(pluck)
 
     # -----------------------------
     # Glass support copied from source, progressively replaced by seed-safe accents.
     # -----------------------------
     vibe_src = all_notes if len(all_notes) < 200 else sorted(all_notes, key=lambda n: (n.start, n.pitch))[vibe_offset::2]
-    vibe = setup_track(f"{style_name.upper()} GLASS SUPPORT", ch=3, program=style_program(style_preset, "vibe", 11), volume=int(46 + brightness * 34), pan=36, reverb=int(24 + reverb_amount * 58), chorus=int(16 + brightness * 34))
+    vibe = setup_track(f"{style_name.upper()} GLASS SUPPORT", ch=3, program=resolved_program(style_preset, "vibe", 11, use_style_instruments=use_style_instruments), volume=int(46 + brightness * 34), pan=36, reverb=int(24 + reverb_amount * 58), chorus=int(16 + brightness * 34))
     for i, n in enumerate(vibe_src):
         if n.start >= song_end or i % 5 == 4:
             continue
@@ -1084,7 +1213,7 @@ def build_reimagined_midi(
         p = pitch_into_range(n.pitch + (12 if n.pitch < lead_lo else 0), max(52, lead_lo), lead_hi)
         if harmony_lock:
             p = maybe_mutate_pitch(p, st, max(52, lead_lo), lead_hi, roots, scale, rng_lead, rewrite * 0.72, chord_bias=max(0.58, harmony_strictness * 0.78))
-        add_note(vibe, 3, p, st, min(max(36, int(n.duration * mix_float(0.42, 0.28, rewrite))), song_end-st), n.vel * mix_float(0.34, 0.24, rewrite))
+        add_mel(vibe, 3, p, st, min(max(36, int(n.duration * mix_float(0.42, 0.28, rewrite))), song_end-st), n.vel * mix_float(0.34, 0.24, rewrite), "vibe", max(52, lead_lo), lead_hi, rng_lead)
     if rewrite > 0.42:
         for bs in range(8 * bar, song_end, 2 * bar):
             if rng_lead.random() > rewrite:
@@ -1092,13 +1221,13 @@ def build_reimagined_midi(
             root = active_root_for_tick(bs, roots)
             for k, deg in enumerate(rng_lead.choice([[4,2,0], [2,4,5], [6,4,2], [5,4,2]])):
                 p = choose_from_scale_degree(root, scale, deg, lead_center + rng_lead.choice([-12, 0, 0]))
-                add_note(vibe, 3, pitch_into_range(p, max(52, lead_lo), lead_hi), bs + k * div, min(div//2, song_end-(bs+k*div)), 38 + int(36 * rewrite) - k*3)
+                add_mel(vibe, 3, pitch_into_range(p, max(52, lead_lo), lead_hi), bs + k * div, min(div//2, song_end-(bs+k*div)), 38 + int(36 * rewrite) - k*3, "vibe", max(52, lead_lo), lead_hi, rng_lead)
     vibe.append(make_meta(song_end, 0x2F, b"", order=99)); new_tracks.append(vibe)
 
     # Soft tonal ticks from dense sources; at high intensity seed changes the pattern heavily.
-    ticks = setup_track(f"{style_name.upper()} TONAL TICKS", ch=4, program=style_program(style_preset, "ticks", 115), volume=int(28 + brightness * 26 + rewrite * 14), pan=96, reverb=int(8 + reverb_amount * 42), chorus=int(4 + brightness * 18))
+    ticks = setup_track(f"{style_name.upper()} TONAL TICKS", ch=4, program=resolved_program(style_preset, "ticks", 115, use_style_instruments=use_style_instruments), volume=int(28 + brightness * 26 + rewrite * 14), pan=96, reverb=int(8 + reverb_amount * 42), chorus=int(4 + brightness * 18))
     tick_src = notes_for_role(analysis, "hook_problem") or notes_for_role(analysis, "arp") or all_notes
-    max_ticks = int(mix_float(160, 1400, max(arp_density, rewrite)))
+    max_ticks = int(mix_float(80, 1400, max(arp_density, rewrite)) * mix_float(0.45, 1.0, repetition))
     for i, n in enumerate(tick_src[:max_ticks]):
         if n.start >= song_end or i % 3 == 2:
             continue
@@ -1111,11 +1240,11 @@ def build_reimagined_midi(
             p = nearest_pitch(pc, 76 + rng_arp.choice([-12, 0, 12]))
         else:
             p = 74 + ((i // 4 + tick_phase) % 7)
-        add_note(ticks, 4, pitch_into_range(p, 56, 88), st, min(max(18, div//7), song_end-st), 32 + int(32 * rewrite) + (i % 4) * 5)
+        add_mel(ticks, 4, pitch_into_range(p, 56, 88), st, min(max(18, div//7), song_end-st), 32 + int(32 * rewrite) + (i % 4) * 5, "ticks", 56, 88, rng_arp)
     ticks.append(make_meta(song_end, 0x2F, b"", order=99)); new_tracks.append(ticks)
 
     # Pads: more original harmonic source at low intensity, seed-derived voicing/progression at high intensity.
-    pad = setup_track(f"{style_name.upper()} PAD", ch=5, program=style_program(style_preset, "pad", 89), volume=int(42 + pad_density * 30 + rewrite * 6), pan=62, reverb=int(36 + reverb_amount * 64), chorus=int(28 + brightness * 48))
+    pad = setup_track(f"{style_name.upper()} PAD", ch=5, program=resolved_program(style_preset, "pad", 89, use_style_instruments=True), volume=int(42 + pad_density * 30 + rewrite * 6), pan=62, reverb=int(36 + reverb_amount * 64), chorus=int(28 + brightness * 48))
     for idx, (st, root) in enumerate(roots):
         if st < 2 * bar or st >= song_end:
             continue
@@ -1174,7 +1303,7 @@ def build_reimagined_midi(
         motif = motif[rot:] + motif[:rot]
         motif = [pitch_into_range(p + (hook_transpose if rng_hook.random() < rewrite else 0), hook_lo, hook_hi) for p in motif]
 
-    hook = setup_track(f"{style_name.upper()} ICON HOOK", ch=6, program=style_program(style_preset, "hook", 80), volume=int(62 + brightness * 28 + rewrite * 10), pan=28, reverb=int(20 + reverb_amount * 52), chorus=int(18 + brightness * 42))
+    hook = setup_track(f"{style_name.upper()} ICON HOOK", ch=6, program=resolved_program(style_preset, "hook", 80, use_style_instruments=use_style_instruments), volume=int(62 + brightness * 28 + rewrite * 10), pan=28, reverb=int(20 + reverb_amount * 52), chorus=int(18 + brightness * 42))
     section_step = 8 * bar
     start_section = 16 * bar if song_end > 32 * bar else 4 * bar
     rhythm_patterns = [
@@ -1194,7 +1323,8 @@ def build_reimagined_midi(
         [div, div//3, div//2, div//2, div//3, div//2],
     ]
     for sec_start in range(start_section, song_end, section_step):
-        reps = 1 if intensity < 0.42 else (2 if intensity < 0.82 else rng_hook.choice([2, 2, 3]))
+        base_reps = 1 if intensity < 0.42 else (2 if intensity < 0.82 else rng_hook.choice([2, 2, 3]))
+        reps = max(1, int(round(base_reps * mix_float(0.55, 1.0, repetition))))
         for rep in range(reps):
             phrase = sec_start + rep * 2 * bar
             if phrase >= song_end:
@@ -1206,16 +1336,16 @@ def build_reimagined_midi(
                 p2 = p + (12 if k == 0 and sec_start >= song_end * 0.65 and rng_hook.random() < 0.65 else 0)
                 if harmony_lock and rng_hook.random() < rewrite:
                     p2 = maybe_mutate_pitch(p2, phrase + rhythm, hook_lo, hook_hi, roots, scale, rng_hook, rewrite * 0.45, chord_bias=0.85)
-                add_note(hook, 6, pitch_into_range(p2, hook_lo, hook_hi), phrase + rhythm, min(dur, song_end-(phrase+rhythm)), 74 + int(16*rewrite) - k*3)
+                add_mel(hook, 6, pitch_into_range(p2, hook_lo, hook_hi), phrase + rhythm, min(dur, song_end-(phrase+rhythm)), 74 + int(16*rewrite) - k*3, "hook", hook_lo, hook_hi, rng_hook)
             answer = phrase + 3*div
             if answer < song_end and intensity > 0.18:
                 for k, p in enumerate(reversed(motif[:3])):
-                    add_note(hook, 6, pitch_into_range(p-12, max(40, hook_lo-12), max(52, hook_hi-10)), answer + k*(div//2), min(div//3, song_end-(answer+k*(div//2))), 48 + int(10*rewrite)-k*4)
+                    add_mel(hook, 6, pitch_into_range(p-12, max(40, hook_lo-12), max(52, hook_hi-10)), answer + k*(div//2), min(div//3, song_end-(answer+k*(div//2))), 48 + int(10*rewrite)-k*4, "hook_answer", max(40, hook_lo-12), max(52, hook_hi-10), rng_hook)
     hook.append(make_meta(song_end, 0x2F, b"", order=99)); new_tracks.append(hook)
 
     # Lead contour.
     lead_src = notes_for_role(analysis, "lead") or hook_src
-    lead = setup_track(f"{style_name.upper()} LEAD CONTOUR", ch=7, program=style_program(style_preset, "lead", 81), volume=int(50 + brightness * 32 + rewrite * 8), pan=104, reverb=int(20 + reverb_amount * 50), chorus=int(16 + brightness * 38))
+    lead = setup_track(f"{style_name.upper()} LEAD CONTOUR", ch=7, program=resolved_program(style_preset, "lead", 81, use_style_instruments=use_style_instruments), volume=int(50 + brightness * 32 + rewrite * 8), pan=104, reverb=int(20 + reverb_amount * 50), chorus=int(16 + brightness * 38))
     last_st_pitch: tuple[int, int] | None = None
     for i, n in enumerate(lead_src):
         if n.start >= song_end:
@@ -1232,7 +1362,7 @@ def build_reimagined_midi(
             continue
         last_st_pitch = (st, p)
         dur = max(div//8, int(n.duration * mix_float(0.72, 0.42, rewrite)))
-        add_note(lead, 7, p, st, min(dur, song_end-st), n.vel * mix_float(0.50, 0.34, rewrite))
+        add_mel(lead, 7, p, st, min(dur, song_end-st), n.vel * mix_float(0.50, 0.34, rewrite), "lead", lead_lo, lead_hi, rng_lead)
     if rewrite > 0.62:
         templates = [[0,2,4,2], [4,5,4,2], [2,0,2,4], [6,5,4,2], [1,3,4,6]]
         for bs in range(24 * bar, song_end, 8 * bar):
@@ -1243,12 +1373,12 @@ def build_reimagined_midi(
                 if st >= song_end:
                     continue
                 p = choose_from_scale_degree(root, scale, deg, lead_center + rng_lead.choice([-12, 0, 0, 12]))
-                add_note(lead, 7, pitch_into_range(p, lead_lo, lead_hi), st, min(div//2, song_end-st), 50 + int(32 * rewrite)-k*3)
+                add_mel(lead, 7, pitch_into_range(p, lead_lo, lead_hi), st, min(div//2, song_end-st), 50 + int(32 * rewrite)-k*3, "lead", lead_lo, lead_hi, rng_lead)
     lead.append(make_meta(song_end, 0x2F, b"", order=99)); new_tracks.append(lead)
 
     # Support echo.
     echo_src = all_notes[::max(1, len(all_notes)//1000)] if len(all_notes) > 1000 else all_notes
-    echo = setup_track(f"{style_name.upper()} SUPPORT ECHO", ch=8, program=style_program(style_preset, "echo", 88), volume=int(20 + brightness * 18 + delay_amount * 24 + rewrite * 10), pan=72, reverb=int(22 + reverb_amount * 56), chorus=int(18 + brightness * 42))
+    echo = setup_track(f"{style_name.upper()} SUPPORT ECHO", ch=8, program=resolved_program(style_preset, "echo", 88, use_style_instruments=use_style_instruments), volume=int(20 + brightness * 18 + delay_amount * 24 + rewrite * 10), pan=72, reverb=int(22 + reverb_amount * 56), chorus=int(18 + brightness * 42))
     for i, n in enumerate(echo_src):
         if n.start >= song_end or i % 7 == 6:
             continue
@@ -1259,7 +1389,7 @@ def build_reimagined_midi(
         if harmony_lock:
             p = maybe_mutate_pitch(p, st, max(44, lead_lo-8), lead_hi, roots, scale, rng_echo, rewrite * 0.85, chord_bias=max(0.46, harmony_strictness * 0.68))
         dur = max(div//6, int(n.duration * mix_float(0.72, 0.48, rewrite)))
-        add_note(echo, 8, p, st, min(dur, song_end-st), n.vel * mix_float(0.22, 0.32, rewrite))
+        add_mel(echo, 8, p, st, min(dur, song_end-st), n.vel * mix_float(0.22, 0.32, rewrite), "echo", max(44, lead_lo-8), lead_hi, rng_echo)
     echo.append(make_meta(song_end, 0x2F, b"", order=99)); new_tracks.append(echo)
 
     # Drums: seed-dependent variations and fills grow with intensity.
@@ -1274,6 +1404,93 @@ def build_reimagined_midi(
                 add_note(drums, 9, 49, bs, div, 30 + int(20 * rewrite))
             if bar_i % 2 == 1 or bar_rng.random() < 0.20 * rewrite:
                 add_note(drums, 9, 42, bs + 2*div + hat_swing, 70, 24 + int(16 * rewrite))
+            continue
+
+        if drum_feel in ("rock", "metal", "punk", "pop"):
+            # Backbeat family for rock/pop/punk/metal-inspired styles.
+            kick_patterns = {
+                "pop": [[0, 2*div + div//2], [0, div + div//2, 2*div + div//2]],
+                "rock": [[0, div + div//2, 2*div + div//2], [0, 2*div, 3*div]],
+                "punk": [[0, div, 2*div, 3*div], [0, div//2, div, 2*div, 3*div]],
+                "metal": [[0, div//2, div, 2*div, 2*div + div//2, 3*div], [0, div//2, div, div + div//2, 2*div, 3*div]],
+            }
+            choices = kick_patterns.get(drum_feel, kick_patterns["rock"])
+            kicks = choices[0] if rewrite < 0.30 else bar_rng.choice(choices)
+            for off in kicks:
+                add_note(drums, 9, 36, bs + off, 44, 92 + int(26 * rewrite))
+            for off in [div, 3*div]:
+                add_note(drums, 9, 38, bs + off, 55, 104 + int(12 * rewrite))
+            hat_step = div//4 if drum_feel in ("punk", "metal") else div//2
+            steps = 16 if hat_step == div//4 else 8
+            for h in range(steps):
+                if drum_feel == "metal" and h % 4 == 0:
+                    add_note(drums, 9, 49, bs + h*hat_step, 28, 46 + int(18*rewrite))
+                else:
+                    add_note(drums, 9, 42 if h % 4 else 46, bs + h*hat_step, 22, 38 + int(22*rewrite) + (h % 2)*6)
+            if bar_i % 4 == 3 or bar_rng.random() < 0.25 * rewrite:
+                for k, note in enumerate(bar_rng.choice([[45,43,41], [47,45,43,41], [50,47,45]])):
+                    add_note(drums, 9, note, bs + 3*div + k*(div//5), 48, 76-k*5)
+            continue
+
+        if drum_feel in ("ska", "reggae", "dub"):
+            # One-drop/offbeat family.
+            if drum_feel == "ska":
+                add_note(drums, 9, 36, bs, 42, 82 + int(10*rewrite))
+                add_note(drums, 9, 38, bs + 2*div, 50, 92 + int(10*rewrite))
+                for beat in range(4):
+                    add_note(drums, 9, 42, bs + beat*div + div//2 + hat_swing, 24, 48 + int(20*rewrite))
+            else:
+                add_note(drums, 9, 36, bs + 2*div, 50, 96 + int(12*rewrite))
+                add_note(drums, 9, 38, bs + 2*div + 8, 55, 88 + int(8*rewrite))
+                if drum_feel == "dub" and (bar_i % 4 == 3 or bar_rng.random() < 0.22*rewrite):
+                    add_note(drums, 9, 38, bs + 3*div + div//2, 60, 58 + int(20*rewrite))
+                for beat in range(4):
+                    add_note(drums, 9, 42, bs + beat*div + div//2 + hat_swing, 28, 34 + int(15*rewrite))
+            if bar_rng.random() < 0.35 * rewrite:
+                add_note(drums, 9, 37, bs + 3*div + div//2, 32, 46 + int(16*rewrite))
+            continue
+
+        if drum_feel in ("folk", "bossa", "latin", "jazz"):
+            if drum_feel == "jazz":
+                # light ride pattern, bass drum feathering and snare accents
+                for beat in range(4):
+                    add_note(drums, 9, 51, bs + beat*div, 26, 54 + int(14*rewrite))
+                    if beat in (1, 3):
+                        add_note(drums, 9, 51, bs + beat*div + div//2 + hat_swing, 20, 38 + int(10*rewrite))
+                add_note(drums, 9, 36, bs, 32, 48 + int(12*rewrite))
+                add_note(drums, 9, 38, bs + 2*div, 38, 54 + int(16*rewrite))
+            elif drum_feel == "bossa":
+                for off in [0, 2*div + div//2]:
+                    add_note(drums, 9, 36, bs + off, 34, 60 + int(16*rewrite))
+                for off in [div, 2*div, 3*div]:
+                    add_note(drums, 9, 37, bs + off + hat_swing, 26, 45 + int(14*rewrite))
+                for h in range(8):
+                    add_note(drums, 9, 42, bs + h*(div//2), 18, 32 + (h%2)*8)
+            elif drum_feel == "latin":
+                for off in [0, div + div//2, 2*div + div//2, 3*div]:
+                    add_note(drums, 9, 36, bs + off, 35, 72 + int(18*rewrite))
+                for off in [div, 3*div]:
+                    add_note(drums, 9, 38, bs + off, 40, 70 + int(16*rewrite))
+                for h in range(8):
+                    add_note(drums, 9, 75 if h%3==0 else 42, bs + h*(div//2) + (hat_swing if h%2 else 0), 20, 42 + int(18*rewrite))
+            else:  # folk
+                add_note(drums, 9, 36, bs, 40, 70 + int(14*rewrite))
+                add_note(drums, 9, 38, bs + 2*div, 45, 72 + int(14*rewrite))
+                for h in range(4):
+                    add_note(drums, 9, 42, bs + h*div + div//2, 22, 34 + int(10*rewrite))
+            continue
+
+        if drum_feel in ("orchestral", "classical"):
+            # Sparse timpani/cymbal orchestral punctuation rather than a kit groove.
+            root_pc = active_root_for_tick(bs, roots)
+            timp = 47 if (root_pc % 2) else 45
+            if bar_i % 2 == 0:
+                add_note(drums, 9, timp, bs, div//2, 54 + int(22*rewrite))
+            if bar_i % 4 == 3 or bar_rng.random() < 0.16 * rewrite:
+                add_note(drums, 9, 49, bs + 3*div, div, 50 + int(22*rewrite))
+            if bar_i % 8 == 7 and rewrite > 0.35:
+                for k, note in enumerate([47, 45, 43, 41]):
+                    add_note(drums, 9, note, bs + 3*div + k*(div//6), 48, 70-k*5)
             continue
 
         if drum_feel in ("dnb", "jungle"):
@@ -1651,6 +1868,9 @@ def process_file(
     render_mp3: bool = True,
     sample_rate: int = 44100,
     intensity: float = 0.65,
+    target_bpm: float | None = None,
+    repetition: float = 0.50,
+    use_style_instruments: bool = False,
     harmony_lock: bool = True,
     seed: int | None = None,
     style_id: str = "synthwave",
@@ -1682,7 +1902,11 @@ def process_file(
     wav = output_dir / f"{safe_prefix}.wav"
     mp3 = output_dir / f"{safe_prefix}.mp3"
     analysis_txt = output_dir / f"{safe_prefix}_analysis.txt"
-    midi_path, analysis = build_reimagined_midi(source, mid, style=resolved_style_id, style_preset=style_preset, intensity=intensity, harmony_lock=harmony_lock, seed=seed, progress=progress)
+    midi_path, analysis = build_reimagined_midi(
+        source, mid, style=resolved_style_id, style_preset=style_preset,
+        intensity=intensity, target_bpm=target_bpm, repetition=repetition,
+        use_style_instruments=use_style_instruments, harmony_lock=harmony_lock, seed=seed, progress=progress,
+    )
     tonic, mode, scale, key_confidence = detect_key_and_mode(analysis)
     generation_summary = (
         "Generation settings:\n"
@@ -1699,7 +1923,10 @@ def process_file(
         f"  Detected key/mode: {NOTE_NAMES[tonic]} {mode} (confidence {key_confidence:.2f})\n"
         f"  Intensity: {intensity:.2f}\n"
         f"  Rewrite amount: {smoothstep01(intensity):.2f}\n"
-        f"  Slider behavior: 0.00 = source-like cleanup, 1.00 = mostly regenerated arrangement in resolved style\n"
+        f"  Target BPM: {target_bpm if target_bpm is not None else 'auto'}\n"
+        f"  Note repetition: {repetition:.2f} (0.00 = reduce same-note loops, 1.00 = keep/allow repeated patterns)\n"
+        f"  Style lead/melody instruments: {'ON' if use_style_instruments else 'OFF'}\n"
+        f"  Slider behavior: intensity 0.00 = source-like cleanup, intensity 1.00 = mostly regenerated arrangement in resolved style\n"
         f"  Sample rate: {sample_rate}\n\n"
     )
     full_summary = generation_summary + analysis.summary
@@ -1720,6 +1947,9 @@ def process_file(
         "style": resolved_style_id,
         "style_name": resolved_style_name,
         "random_style": bool(random_style),
+        "target_bpm": target_bpm,
+        "repetition": repetition,
+        "use_style_instruments": bool(use_style_instruments),
         "source_hash": source_hash,
         "summary": full_summary,
     }
@@ -1734,6 +1964,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--no-mp3", action="store_true", help="Skip MP3 conversion")
     ap.add_argument("--sample-rate", type=int, default=44100, help="WAV sample rate")
     ap.add_argument("--intensity", type=float, default=0.65, help="Transformation intensity 0.0-1.0")
+    ap.add_argument("--bpm", type=float, default=None, help="Optional exact target BPM. Omit for source/style-derived auto BPM.")
+    ap.add_argument("--repetition", type=float, default=0.50, help="Repeated-note amount 0.0-1.0. Lower values reduce long same-note loops.")
+    ap.add_argument("--use-style-instruments", action="store_true", help="Use style preset GM programs for lead/melody tracks too.")
     ap.add_argument("--no-harmony-lock", action="store_true", help="Disable scale/chord correction. Default keeps copied notes harmonically locked.")
     ap.add_argument("--seed", type=int, default=None, help="Reproducible generation seed. Omit for a new random seed each run.")
     ap.add_argument("--style", default="synthwave", help="Style preset id, e.g. synthwave, darksynth, techno, drum_and_bass. See app/styles/style_presets.json.")
@@ -1747,6 +1980,9 @@ def main(argv: list[str] | None = None) -> int:
         render_mp3=not args.no_mp3,
         sample_rate=args.sample_rate,
         intensity=max(0.0, min(1.0, args.intensity)),
+        target_bpm=args.bpm,
+        repetition=max(0.0, min(1.0, args.repetition)),
+        use_style_instruments=args.use_style_instruments,
         harmony_lock=not args.no_harmony_lock,
         seed=args.seed,
         style_id=args.style,
