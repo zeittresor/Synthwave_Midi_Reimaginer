@@ -1,0 +1,21 @@
+Synthwave MIDI Reimaginer GUI v0.2.2
+====================================
+
+Functional update after user testing:
+
+- Transformation Intensity is now a real musical macro control:
+  - 0% = close to source MIDI / cleanup-oriented output
+  - 50% = recognizable source material with stronger style arrangement
+  - 100% = mostly regenerated song in the selected style while preserving source key/structure as a guide
+- Seed now affects the full arrangement more strongly:
+  - bass patterns
+  - arp patterns
+  - pad voicings/progression variation
+  - hook motif generation
+  - lead contour mutations
+  - drum fills/ghost notes/hat variations
+  - echo/support-note selection
+- Same seed + same MIDI + same settings remains reproducible.
+- Different seed should now produce more audibly different results.
+- Intensity tooltip is no longer hardcoded to Synthwave and updates according to the selected style or Random Style mode.
+- Analysis TXT now records the computed rewrite amount and slider behavior.

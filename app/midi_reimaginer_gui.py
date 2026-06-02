@@ -29,7 +29,7 @@ if str(APP_DIR) not in sys.path:
 
 import midi_reimaginer_core as core
 
-APP_VERSION = "0.2.1"
+APP_VERSION = "0.2.2"
 
 
 @dataclass
@@ -118,7 +118,7 @@ class MainWindow(QMainWindow):
 
         title = QLabel("Synthwave MIDI Reimaginer - Multi Style")
         title.setObjectName("Title")
-        title.setToolTip("Creates a cleaned-up, synthwave-inspired variation from a MIDI file and can render WAV/MP3 previews offline.")
+        title.setToolTip("Creates a cleaned-up derivative electronic version from a MIDI file using selectable modular style presets, with offline MIDI/WAV rendering.")
         main.addWidget(title)
 
         file_group = QGroupBox("1. Source / Output")
@@ -204,9 +204,9 @@ class MainWindow(QMainWindow):
         self.intensity_slider = QSlider(Qt.Orientation.Horizontal)
         self.intensity_slider.setRange(0, 100)
         self.intensity_slider.setValue(65)
-        self.intensity_slider.setToolTip("How strongly the song is pushed into the cleaned synthwave arrangement. 50-70 is a good range.")
+        self.intensity_slider.setToolTip("Transformation strength. 0% = close to the source/cleanup only. 100% = mostly regenerated song in the selected style.")
         self.intensity_label = QLabel("65%")
-        self.intensity_slider.valueChanged.connect(lambda v: self.intensity_label.setText(f"{v}%"))
+        self.intensity_slider.valueChanged.connect(self._intensity_changed)
         self.theme_combo = QComboBox()
         self.theme_combo.addItems(["Dark", "Light"])
         self.theme_combo.currentTextChanged.connect(lambda t: self._apply_dark_theme() if t == "Dark" else self._apply_light_theme())
@@ -373,6 +373,30 @@ The selectable styles live in `app/styles/style_presets.json`. A human-readable 
         self.style_info_label.setText(
             f"{mode}{style.get('info', '')} | BPM {style.get('bpm_min', '?')}-{style.get('bpm_max', '?')} | "
             f"Drums: {style.get('drum_feel', '?')} | Instruments: {style.get('instruments', '')}"
+        )
+        self._update_intensity_tooltip()
+
+    def _intensity_changed(self, value: int):
+        self.intensity_label.setText(f"{value}%")
+        self._update_intensity_tooltip()
+
+    def _update_intensity_tooltip(self):
+        if not hasattr(self, "intensity_slider"):
+            return
+        value = self.intensity_slider.value() if hasattr(self, "intensity_slider") else 65
+        if getattr(self, "random_style_cb", None) and self.random_style_cb.isChecked():
+            style_name = "the seed-resolved random style"
+            style_hint = "Random Style is ON, so the seed first chooses the style, then the same seed shapes the arrangement."
+        else:
+            style = self._style_by_id(self._selected_style_id())
+            style_name = str(style.get("name", self._selected_style_id()))
+            style_hint = str(style.get("info", ""))
+        self.intensity_slider.setToolTip(
+            f"Transformation strength for {style_name}. Current: {value}%.\n"
+            "0% = very close to the source MIDI: mostly cleanup, quantizing and harmonic safety.\n"
+            "50% = recognizable source material with a stronger style arrangement.\n"
+            f"100% = largely regenerated song in {style_name}, still using source key/structure as a guide.\n"
+            f"{style_hint}"
         )
 
     def browse_source(self):
