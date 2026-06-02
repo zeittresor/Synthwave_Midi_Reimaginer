@@ -1,83 +1,184 @@
-# Synthwave MIDI Reimaginer GUI
+# Synthwave MIDI Reimaginer GUI v0.2.1
 
-Reimaginer any midi song you like. With Parameter, Midi, WAV, MP3 output for any random or reproduceable seed you set. 
 
-<img width="1183" height="811" alt="Synthwave_Midi_Reimaginer" src="https://github.com/user-attachments/assets/0703af27-d0e1-4706-9d0f-7352fecc7eaa" />
+## Hotfix v0.2.1
 
-## Start on Windows
+Fixed a render crash introduced in v0.2.0 where the Support Echo track used `delay_amount` before it was initialized.
 
-1. Run `install_windows.bat`
-2. After setup, run `run_windows.bat`
-3. Choose a `.mid` or `.midi` file
-4. Click **Analyze MIDI**
-5. Click **Create New Version**
+Offline-friendly PyQt6 tool that analyzes a MIDI file and creates a cleaned-up electronic derivative version. It can render an internal WAV preview without relying on the Windows MIDI wavetable. MP3 export is optional and uses a real `ffmpeg.exe` when available.
 
-The installer creates a local `.venv` folder. After the first successful setup, the GUI can run offline via `run_windows.bat`.
+## Start
 
-## Files in this package
+1. Extract the ZIP.
+2. Run `install_windows.bat` once.
+3. Run `run_windows.bat`.
+4. Choose a `.mid` or `.midi` file.
+5. Click **Analyze MIDI**.
+6. Choose a **Style Preset**.
+7. Click **Create New Version**.
 
-- `app/midi_reimaginer_gui.py` - PyQt6 GUI
-- `app/midi_reimaginer_core.py` - MIDI parser, analyzer, transformer, WAV renderer, optional MP3 converter
-- `install_windows.bat` - creates `.venv` and installs requirements
-- `run_windows.bat` - starts the GUI
-- `reinstall_windows.bat` - removes `.venv` and reinstalls
-- `prepare_wheelhouse_online.bat` - downloads dependency wheels for future offline reinstall
-- `run_cli_example.bat` - command-line example using `examples/test.mid`
-- `legacy/make_fixed_synthwave_v2.py` - the previous manual script for reference
+The included example is under `examples/test.mid`.
 
-## Offline reinstall / wheelhouse mode
+## New in v0.2.1: Style Presets
 
-For a fully offline reinstall on the same or a very similar Windows/Python setup:
+The GUI now has a style dropdown. The engine uses the selected style to influence:
 
-1. On an internet-connected machine, run `prepare_wheelhouse_online.bat`.
-2. Keep the generated `wheelhouse` folder together with this package.
-3. Later, `install_windows.bat` will automatically prefer `wheelhouse` and install without internet.
+- BPM target range
+- drum-feel / rhythm family
+- bass, lead, arp and pad pitch registers
+- note density
+- instrument program choices
+- brightness, reverb and distortion-like shaping values
+- harmony strictness
 
-Note: PyQt6 wheels are Python-version and platform specific. A wheelhouse prepared on Python 3.12 Windows x64 is intended for the same kind of setup.
+Included style examples:
 
-## MP3 export and the ffmpeg fix
+- Synthwave
+- Retrowave
+- Outrun
+- Darksynth
+- Cyberpunk
+- Chillwave
+- Vaporwave
+- Ambient
+- Berlin School
+- Electro
+- Techno
+- Acid Techno
+- House
+- Deep House
+- Trance
+- Psytrance
+- Drum and Bass
+- Liquid Drum and Bass
+- Breakbeat
+- UK Garage
+- Dubstep
+- Future Bass
+- Trap EDM
+- IDM
+- Glitch
+- Chiptune
+- Eurodance
+- Hardstyle
+- Industrial
+- Downtempo
+- Trip Hop
+- Nu Disco
+- Synthpop
+- Italo Disco
 
-The earlier script failed on this console output:
+## Random Style from seed
+
+If **Random Style from seed** is enabled, the selected dropdown style is ignored and the engine chooses one style from the available presets using the generation seed.
+
+That means:
 
 ```text
-Unrecognized option 'hide_banner'.
-Error splitting the argument list: Option not found
+same source MIDI + same seed + same style preset file = same resolved style and same result
 ```
 
-That usually means that the executable found as `ffmpeg.EXE` is not a real FFmpeg binary or is a limited shim. This GUI fixes that in two ways:
+The resolved style is written into the analysis TXT and into the output filename when `{style}` is used.
 
-1. It validates candidates with `ffmpeg -version` and requires the output to contain `ffmpeg version`.
-2. It no longer depends on `-hide_banner`.
+## Seeds
 
-If no real ffmpeg is found, MP3 is skipped safely. The WAV file is still created.
+- **New random seed each render**: creates a new seed for each render.
+- **Manual seed**: repeats the same version exactly when settings and input are unchanged.
 
-Supported ffmpeg locations:
+The seed is written to:
 
-- `SYNTHWAVE_FFMPEG` environment variable
-- `tools/ffmpeg/bin/ffmpeg.exe`
-- `tools/ffmpeg/ffmpeg.exe`
-- `portable_ffmpeg/ffmpeg.exe`
-- a real `ffmpeg.exe` on PATH
+- output filename if `{seed}` is used
+- MIDI metadata
+- `_analysis.txt`
 
-## Command-line usage
+## Filename placeholders
+
+The filename prefix field supports:
+
+```text
+{source}       input MIDI filename without extension
+{style}        resolved style id
+{style_name}   resolved style name as a safe token
+{seed}         actual generation seed
+{source_hash}  SHA-256 hash prefix of the source MIDI
+```
+
+Default:
+
+```text
+{source}_{style}_seed{seed}
+```
+
+## Modular style files
+
+Style presets live here:
+
+```text
+app/styles/style_presets.json
+```
+
+A human-readable table is included here:
+
+```text
+app/styles/electronic_styles.csv
+```
+
+To add a style, copy an existing JSON object, give it a unique `id`, change the musical values, and restart the GUI.
+
+Important fields:
+
+```text
+id
+name
+instruments
+meter
+info
+bpm_min
+bpm_max
+swing
+drum_feel
+bass_center
+lead_center
+arp_density
+pad_density
+brightness
+distortion
+reverb
+delay
+harmony_strictness
+programs
+```
+
+## CLI examples
+
+Manual style:
 
 ```bat
-.venv\Scripts\python.exe app\midi_reimaginer_core.py input.mid --out-dir output --prefix my_song_v2
+.venv\Scripts\python.exe app\midi_reimaginer_core.py examples\test.mid --out-dir output --style darksynth --seed 123456
 ```
 
-Options:
+Random style from seed:
 
-```text
---no-audio       Only create MIDI and analysis text
---no-mp3         Skip MP3 conversion
---sample-rate    44100 or 48000 recommended
---intensity      Transformation strength from 0.0 to 1.0
+```bat
+.venv\Scripts\python.exe app\midi_reimaginer_core.py examples\test.mid --out-dir output --random-style --seed 123456
 ```
 
-## Current limits
+## Offline behavior
 
-This is a heuristic MIDI re-arranger, not a full AI music model. It should work best with structured multi-track MIDI files. Very sparse one-track files or unusual SMPTE-time MIDI files may need manual cleanup.
+After `install_windows.bat` has installed the local `.venv` once, `run_windows.bat` works offline.
 
-## Source
+For preparing dependencies for another offline machine, run:
 
-github.com/zeittresor/Synthwave_Midi_Reimaginer
+```bat
+prepare_wheelhouse_online.bat
+```
+
+on an internet-connected system and keep the generated `wheelhouse` folder with the project.
+
+## MP3 export
+
+MP3 export needs a real FFmpeg binary. The tool validates `ffmpeg -version` and ignores fake Python package shims named `ffmpeg.exe`. If MP3 conversion fails, MIDI and WAV are still created.
+
+## Current limitations
+
+This is still a heuristic MIDI re-arranger, not a full composition AI or DAW. The results depend heavily on the source MIDI. Very disharmonic, key-changing or sparse source files can still produce odd moments, but Harmony Lock and style-specific harmony strictness should reduce the worst clashes.

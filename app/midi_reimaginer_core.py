@@ -13,6 +13,7 @@ from pathlib import Path
 from collections import defaultdict, Counter
 from typing import Callable, Iterable
 import argparse
+import hashlib
 import json
 import math
 import os
@@ -113,6 +114,150 @@ def normalize_seed(seed: int | str | None) -> int:
     if value < 0:
         value = abs(value)
     return int(value % 2_147_483_647) or 1
+
+
+
+
+# -----------------------------
+# Modular style presets
+# -----------------------------
+STYLE_PRESET_VERSION = 1
+
+
+def _styles_dir() -> Path:
+    return Path(__file__).resolve().parent / "styles"
+
+
+def _style_json_path() -> Path:
+    return _styles_dir() / "style_presets.json"
+
+
+def safe_token(text: str, fallback: str = "style") -> str:
+    text = (text or "").strip().lower().replace(" ", "_").replace("-", "_")
+    out = []
+    for ch in text:
+        out.append(ch if ch.isalnum() or ch == "_" else "_")
+    token = "".join(out).strip("_")
+    while "__" in token:
+        token = token.replace("__", "_")
+    return token or fallback
+
+
+def load_style_presets() -> list[dict]:
+    """Load modular style presets from app/styles/style_presets.json."""
+    path = _style_json_path()
+    styles: list[dict] = []
+    if path.exists():
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            styles = raw.get("styles", raw if isinstance(raw, list) else [])
+        except Exception:
+            styles = []
+    cleaned: list[dict] = []
+    seen: set[str] = set()
+    for item in styles:
+        if not isinstance(item, dict):
+            continue
+        sid = safe_token(str(item.get("id") or item.get("name") or "style"))
+        if sid in seen:
+            continue
+        seen.add(sid)
+        entry = dict(item)
+        entry["id"] = sid
+        entry.setdefault("name", sid.replace("_", " ").title())
+        entry.setdefault("instruments", "synth bass, pad, lead, drum machine")
+        entry.setdefault("meter", "4/4")
+        entry.setdefault("info", "Generic electronic style preset.")
+        entry.setdefault("bpm_min", 90)
+        entry.setdefault("bpm_max", 128)
+        entry.setdefault("swing", 0.04)
+        entry.setdefault("drum_feel", "four_on_floor")
+        entry.setdefault("bass_center", 42)
+        entry.setdefault("lead_center", 68)
+        entry.setdefault("arp_density", 0.60)
+        entry.setdefault("pad_density", 0.70)
+        entry.setdefault("brightness", 0.55)
+        entry.setdefault("distortion", 0.15)
+        entry.setdefault("reverb", 0.55)
+        entry.setdefault("delay", 0.40)
+        entry.setdefault("harmony_strictness", 0.88)
+        entry.setdefault("programs", {})
+        cleaned.append(entry)
+    if not cleaned:
+        cleaned.append({
+            "id": "synthwave", "name": "Synthwave",
+            "instruments": "analog synth lead, juno pad, gated snare, synth bass, arpeggiator, tom fills",
+            "meter": "4/4", "info": "Fallback synthwave preset.",
+            "bpm_min": 96, "bpm_max": 128, "swing": 0.05, "drum_feel": "four_on_floor",
+            "bass_center": 45, "lead_center": 68, "arp_density": 0.72, "pad_density": 0.72,
+            "brightness": 0.62, "distortion": 0.20, "reverb": 0.58, "delay": 0.46,
+            "harmony_strictness": 0.84,
+            "programs": {"bass": 38, "pluck": 5, "vibe": 11, "ticks": 115, "pad": 89, "hook": 80, "lead": 81, "echo": 88},
+        })
+    return cleaned
+
+
+def get_style_by_id(style_id: str | None) -> dict:
+    styles = load_style_presets()
+    wanted = safe_token(style_id or "synthwave")
+    for style in styles:
+        if style.get("id") == wanted:
+            return dict(style)
+    for style in styles:
+        if safe_token(str(style.get("name", ""))) == wanted:
+            return dict(style)
+    for style in styles:
+        if style.get("id") == "synthwave":
+            return dict(style)
+    return dict(styles[0])
+
+
+def resolve_style_preset(style_id: str | None = "synthwave", *, random_style: bool = False, seed: int | None = None) -> dict:
+    styles = load_style_presets()
+    if random_style:
+        rng = random.Random(normalize_seed(seed))
+        return dict(rng.choice(styles))
+    return get_style_by_id(style_id)
+
+
+def style_float(style: dict, key: str, default: float, lo: float | None = None, hi: float | None = None) -> float:
+    try:
+        value = float(style.get(key, default))
+    except Exception:
+        value = float(default)
+    if lo is not None:
+        value = max(lo, value)
+    if hi is not None:
+        value = min(hi, value)
+    return value
+
+
+def style_int(style: dict, key: str, default: int, lo: int | None = None, hi: int | None = None) -> int:
+    try:
+        value = int(round(float(style.get(key, default))))
+    except Exception:
+        value = int(default)
+    if lo is not None:
+        value = max(lo, value)
+    if hi is not None:
+        value = min(hi, value)
+    return value
+
+
+def style_program(style: dict, role: str, default: int) -> int:
+    programs = style.get("programs") if isinstance(style.get("programs"), dict) else {}
+    try:
+        return max(0, min(127, int(programs.get(role, default))))
+    except Exception:
+        return default
+
+
+def source_midi_hash(path: Path | str) -> str:
+    h = hashlib.sha256()
+    with Path(path).open("rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()[:16]
 
 
 def read_var(data: bytes, i: int) -> tuple[int, int]:
@@ -671,7 +816,8 @@ def build_reimagined_midi(
     src: Path | str,
     out_mid: Path | str,
     *,
-    style: str = "clean_synthwave",
+    style: str = "synthwave",
+    style_preset: dict | None = None,
     intensity: float = 0.65,
     preserve_length: bool = True,
     harmony_lock: bool = True,
@@ -683,36 +829,65 @@ def build_reimagined_midi(
     seed = normalize_seed(seed)
     rng = random.Random(seed)
     variant = rng.randrange(4)
+    style_preset = dict(style_preset or get_style_by_id(style))
+    style_id = style_preset.get("id", safe_token(style))
+    style_name = str(style_preset.get("name", style_id))
+    style_slug = safe_token(style_id)
     log(progress, f"Analysiere MIDI: {src.name}")
     log(progress, f"Generation seed: {seed} / arrangement variant {variant}")
+    log(progress, f"Style preset: {style_name} ({style_slug})")
     analysis = analyze_midi(src, progress=progress)
     div = analysis.division
     bar = div * 4
     song_end = analysis.end_tick if preserve_length else min(analysis.end_tick, 96 * bar)
     song_end = max(song_end, 8 * bar)
 
-    # Nudge into synthwave-friendly tempo but don't destroy the original feel.
-    tempo_jitter = rng.uniform(-1.4, 1.4)
-    target_bpm = max(88.0, min(132.0, analysis.bpm * (1.02 + 0.06 * intensity) + tempo_jitter))
+    # Nudge into the selected style's tempo window without destroying the original feel.
+    bpm_min = style_float(style_preset, "bpm_min", 88.0, 40.0, 220.0)
+    bpm_max = style_float(style_preset, "bpm_max", 132.0, bpm_min + 1.0, 240.0)
+    style_mid_bpm = (bpm_min + bpm_max) / 2.0
+    tempo_jitter = rng.uniform(-1.8, 1.8)
+    source_bias = 0.38 if bpm_max < 150 else 0.22
+    target_bpm = analysis.bpm * source_bias + style_mid_bpm * (1.0 - source_bias)
+    target_bpm = max(bpm_min, min(bpm_max, target_bpm + tempo_jitter + (intensity - 0.5) * 5.0))
     tempo = int(round(60_000_000 / target_bpm))
-    log(progress, f"Erzeuge neue Version bei ca. {target_bpm:.1f} BPM")
+    log(progress, f"Erzeuge neue {style_name}-Version bei ca. {target_bpm:.1f} BPM")
+
+    # Style shaping values. These are deliberately simple continuous controls so
+    # custom style presets can be authored by hand.
+    swing_amount = style_float(style_preset, "swing", 0.04, 0.0, 0.25)
+    arp_density = style_float(style_preset, "arp_density", 0.60, 0.0, 1.0)
+    pad_density = style_float(style_preset, "pad_density", 0.70, 0.0, 1.0)
+    harmony_strictness = style_float(style_preset, "harmony_strictness", 0.88, 0.0, 1.0)
+    brightness = style_float(style_preset, "brightness", 0.55, 0.0, 1.0)
+    distortion = style_float(style_preset, "distortion", 0.15, 0.0, 1.0)
+    reverb_amount = style_float(style_preset, "reverb", 0.55, 0.0, 1.0)
+    delay_amount = style_float(style_preset, "delay", 0.40, 0.0, 1.0)
+    drum_feel = str(style_preset.get("drum_feel", "four_on_floor"))
+    bass_center = style_int(style_preset, "bass_center", 42, 28, 58)
+    lead_center = style_int(style_preset, "lead_center", 68, 52, 84)
+    bass_lo, bass_hi = max(24, bass_center - 8), min(64, bass_center + 10)
+    lead_lo, lead_hi = max(45, lead_center - 11), min(91, lead_center + 13)
+    hook_lo, hook_hi = max(48, lead_center - 9), min(88, lead_center + 10)
+    arp_lo, arp_hi = max(45, lead_center - 16), min(88, lead_center + 10)
+    pad_center = max(45, min(68, bass_center + 16))
 
     all_notes = all_melodic_notes(analysis)
     tonic, mode, scale, key_confidence = detect_key_and_mode(analysis)
-    log(progress, f"Harmony lock: {'ON' if harmony_lock else 'OFF'} - detected {NOTE_NAMES[tonic]} {mode} (confidence {key_confidence:.2f})")
+    log(progress, f"Harmony lock: {'ON' if harmony_lock else 'OFF'} - detected {NOTE_NAMES[tonic]} {mode} (confidence {key_confidence:.2f}, strictness {harmony_strictness:.2f})")
 
     roots = derive_roots(analysis, bar, scale)
     pluck_phase = rng.randrange(8)
     vibe_offset = rng.randrange(2)
     tick_phase = rng.randrange(4)
     hook_transpose = rng.choice([-12, 0, 0, 0, 12]) if intensity > 0.75 else rng.choice([0, 0, 0, 12])
-    hat_swing = rng.choice([div // 20, div // 18, div // 16])
+    hat_swing = int(div * swing_amount) if swing_amount > 0 else 0
     fill_variant = rng.randrange(4)
 
     new_tracks: list[list[Event]] = []
     meta = [
-        make_meta(0, 0x03, b"Synthwave MIDI Reimaginer GUI", order=0),
-        make_meta(0, 0x01, f"Seed: {seed}; Variant: {variant}; Harmony lock: {'ON' if harmony_lock else 'OFF'}".encode("latin1", errors="replace"), order=1),
+        make_meta(0, 0x03, f"Synthwave MIDI Reimaginer GUI - {style_name}".encode("latin1", errors="replace"), order=0),
+        make_meta(0, 0x01, f"Seed: {seed}; Style: {style_slug}; Variant: {variant}; Harmony lock: {'ON' if harmony_lock else 'OFF'}".encode("latin1", errors="replace"), order=1),
         make_meta(0, 0x51, tempo.to_bytes(3, "big"), order=2),
         make_meta(0, 0x58, bytes(analysis.time_signature), order=3),
     ]
@@ -725,52 +900,52 @@ def build_reimagined_midi(
     bass_src = notes_for_role(analysis, "bass") or [n for n in all_notes if n.pitch < 60] or all_notes[:]
     if not bass_src:
         bass_src = [Note(0, song_end, 48, 90, 1)]
-    bass = setup_track("LOCKED ANALOG BASS", ch=1, program=38, volume=115, pan=48, reverb=10, chorus=18)
+    bass = setup_track(f"{style_name.upper()} BASS", ch=1, program=style_program(style_preset, "bass", 38), volume=int(106 + distortion * 20), pan=48, reverb=int(8 + reverb_amount * 24), chorus=int(14 + brightness * 18))
     for n in bass_src:
         if n.start >= song_end:
             continue
         st = quantize_tick(n.start, div // 4)
         dur = max(div // 8, quantize_tick(n.duration, div // 8))
-        p = pitch_into_range(n.pitch, 36, 55)
+        p = pitch_into_range(n.pitch, bass_lo, bass_hi)
         if harmony_lock:
-            p = sanitize_copied_pitch(p, 36, 55, st, roots, scale, chord_bias=0.75)
+            p = sanitize_copied_pitch(p, bass_lo, bass_hi, st, roots, scale, chord_bias=max(0.75, harmony_strictness))
         add_note(bass, 1, p, st, min(int(dur * 0.88), song_end - st), n.vel * 0.95)
         if intensity > 0.55 and st >= 32*bar and (st // max(1, div//2)) % 8 == 0:
             add_note(bass, 1, max(24, p-12), st, min(div//2, song_end-st), n.vel * 0.35)
     bass.append(make_meta(song_end, 0x2F, b"", order=99)); new_tracks.append(bass)
 
     arp_src = notes_for_role(analysis, "arp") or all_notes
-    pluck = setup_track("CLEAN FM PLUCK", ch=2, program=5, volume=84, pan=82, reverb=34, chorus=24)
+    pluck = setup_track(f"{style_name.upper()} PLUCK / ARP", ch=2, program=style_program(style_preset, "pluck", 5), volume=int(70 + brightness * 28), pan=82, reverb=int(18 + reverb_amount * 48), chorus=int(12 + brightness * 30))
     for i, n in enumerate(arp_src):
         if n.start >= song_end:
             continue
-        skip_mod = 10 - int(4 * intensity)
+        skip_mod = max(2, int(round(13 - 9 * arp_density - 3 * intensity)))
         if skip_mod > 2 and (i + pluck_phase) % skip_mod == skip_mod - 1 and n.start > 16*bar:
             continue
         st = quantize_tick(n.start, div // 4)
         dur = max(div // 10, int(n.duration * (0.48 + 0.18 * intensity)))
-        p = pitch_into_range(n.pitch - (12 if n.pitch > 82 else 0), 52, 82)
+        p = pitch_into_range(n.pitch - (12 if n.pitch > arp_hi else 0), arp_lo, arp_hi)
         if harmony_lock:
-            p = sanitize_copied_pitch(p, 52, 82, st, roots, scale, chord_bias=0.42)
+            p = sanitize_copied_pitch(p, arp_lo, arp_hi, st, roots, scale, chord_bias=max(0.42, harmony_strictness * 0.72))
         add_note(pluck, 2, p, st, min(dur, song_end-st), n.vel * 0.58)
     pluck.append(make_meta(song_end, 0x2F, b"", order=99)); new_tracks.append(pluck)
 
     vibe_src = all_notes if len(all_notes) < 200 else sorted(all_notes, key=lambda n: (n.start, n.pitch))[vibe_offset::2]
-    vibe = setup_track("GLASS ARP SUPPORT", ch=3, program=11, volume=76, pan=36, reverb=52, chorus=30)
+    vibe = setup_track(f"{style_name.upper()} GLASS SUPPORT", ch=3, program=style_program(style_preset, "vibe", 11), volume=int(56 + brightness * 34), pan=36, reverb=int(24 + reverb_amount * 58), chorus=int(16 + brightness * 34))
     for i, n in enumerate(vibe_src):
         if n.start >= song_end or i % 5 == 4:
             continue
         st = quantize_tick(n.start + (div//2 if i % 8 == 3 else 0), div // 4)
         if st >= song_end:
             continue
-        p = pitch_into_range(n.pitch + (12 if n.pitch < 60 else 0), 60, 84)
+        p = pitch_into_range(n.pitch + (12 if n.pitch < lead_lo else 0), max(52, lead_lo), lead_hi)
         if harmony_lock:
-            p = sanitize_copied_pitch(p, 60, 84, st, roots, scale, chord_bias=0.58)
+            p = sanitize_copied_pitch(p, max(52, lead_lo), lead_hi, st, roots, scale, chord_bias=max(0.58, harmony_strictness * 0.78))
         add_note(vibe, 3, p, st, min(max(36, int(n.duration * 0.40)), song_end-st), n.vel * 0.36)
     vibe.append(make_meta(song_end, 0x2F, b"", order=99)); new_tracks.append(vibe)
 
     # Soft perc ticks from dense sources, not high squeaks.
-    ticks = setup_track("SOFT TONAL TICKS", ch=4, program=115, volume=55, pan=96, reverb=18, chorus=8)
+    ticks = setup_track(f"{style_name.upper()} TONAL TICKS", ch=4, program=style_program(style_preset, "ticks", 115), volume=int(38 + brightness * 32), pan=96, reverb=int(8 + reverb_amount * 42), chorus=int(4 + brightness * 18))
     tick_src = notes_for_role(analysis, "hook_problem") or notes_for_role(analysis, "arp") or all_notes
     for i, n in enumerate(tick_src[:1200]):
         if n.start >= song_end or i % 3 == 2:
@@ -786,14 +961,16 @@ def build_reimagined_midi(
     ticks.append(make_meta(song_end, 0x2F, b"", order=99)); new_tracks.append(ticks)
 
     # Warm pad from derived roots.
-    pad = setup_track("WARM ANALOG PAD", ch=5, program=89, volume=72, pan=62, reverb=72, chorus=55)
+    pad = setup_track(f"{style_name.upper()} PAD", ch=5, program=style_program(style_preset, "pad", 89), volume=int(48 + pad_density * 32), pan=62, reverb=int(36 + reverb_amount * 64), chorus=int(28 + brightness * 48))
     for idx, (st, root) in enumerate(roots):
         if st < 2 * bar or st >= song_end:
+            continue
+        if pad_density < 0.45 and idx % 3 == 1:
             continue
         pcs = chord_tones_for_root(root, scale, seventh=(idx % 3 == 1 and len(scale) >= 6))
         dur = min(bar * 2 - div // 4, song_end - st)
         for j, pc in enumerate(pcs):
-            p = nearest_pitch(pc, 52 + j * 5 + (variant - 1) * 2)
+            p = nearest_pitch(pc, pad_center + j * 5 + (variant - 1) * 2)
             if j == 0 and p > 55:
                 p -= 12
             add_note(pad, 5, p, st + j * 4, max(div//2, dur - j*4), 42 + j*6)
@@ -809,9 +986,9 @@ def build_reimagined_midi(
         sampled = motif_notes[:8]
         motif = []
         for n in sampled:
-            p = pitch_into_range(n.pitch, 60, 76)
+            p = pitch_into_range(n.pitch, hook_lo, hook_hi)
             if harmony_lock:
-                p = sanitize_copied_pitch(p, 60, 76, n.start, roots, scale, chord_bias=0.82)
+                p = sanitize_copied_pitch(p, hook_lo, hook_hi, n.start, roots, scale, chord_bias=max(0.82, harmony_strictness))
             motif.append(p)
         # remove immediate duplicates
         compact = []
@@ -822,8 +999,8 @@ def build_reimagined_midi(
         if motif:
             rot = variant % len(motif)
             motif = motif[rot:] + motif[:rot]
-            motif = [pitch_into_range(p + hook_transpose, 58, 79) for p in motif]
-    hook = setup_track("ICON HOOK - DE-SQUEAKED", ch=6, program=80, volume=90, pan=28, reverb=42, chorus=38)
+            motif = [pitch_into_range(p + hook_transpose, hook_lo, hook_hi) for p in motif]
+    hook = setup_track(f"{style_name.upper()} ICON HOOK", ch=6, program=style_program(style_preset, "hook", 80), volume=int(70 + brightness * 30), pan=28, reverb=int(20 + reverb_amount * 52), chorus=int(18 + brightness * 42))
     section_step = 8 * bar
     start_section = 16 * bar if song_end > 32 * bar else 4 * bar
     for sec_start in range(start_section, song_end, section_step):
@@ -847,23 +1024,23 @@ def build_reimagined_midi(
                 rhythm = rhythm_patterns[variant][k % 6]
                 dur = dur_patterns[variant][k % 6]
                 p2 = p + (12 if k == 0 and sec_start >= song_end * 0.65 else 0)
-                add_note(hook, 6, pitch_into_range(p2, 58, 79), phrase + rhythm, min(dur, song_end-(phrase+rhythm)), 86-k*4)
+                add_note(hook, 6, pitch_into_range(p2, hook_lo, hook_hi), phrase + rhythm, min(dur, song_end-(phrase+rhythm)), 86-k*4)
             answer = phrase + 3*div
             if answer < song_end:
                 for k, p in enumerate(reversed(motif[:3])):
-                    add_note(hook, 6, pitch_into_range(p-12, 48, 68), answer + k*(div//2), min(div//3, song_end-(answer+k*(div//2))), 54-k*4)
+                    add_note(hook, 6, pitch_into_range(p-12, max(40, hook_lo-12), max(52, hook_hi-10)), answer + k*(div//2), min(div//3, song_end-(answer+k*(div//2))), 54-k*4)
     hook.append(make_meta(song_end, 0x2F, b"", order=99)); new_tracks.append(hook)
 
     lead_src = notes_for_role(analysis, "lead") or hook_src
-    lead = setup_track("ROUNDED LEAD CONTOUR", ch=7, program=81, volume=78, pan=104, reverb=44, chorus=34)
+    lead = setup_track(f"{style_name.upper()} LEAD CONTOUR", ch=7, program=style_program(style_preset, "lead", 81), volume=int(58 + brightness * 34), pan=104, reverb=int(20 + reverb_amount * 50), chorus=int(16 + brightness * 38))
     last_st_pitch: tuple[int, int] | None = None
     for i, n in enumerate(lead_src):
         if n.start >= song_end:
             continue
         st = quantize_tick(n.start, div // 4)
-        p = pitch_into_range(n.pitch, 55, 84)
+        p = pitch_into_range(n.pitch, lead_lo, lead_hi)
         if harmony_lock:
-            p = sanitize_copied_pitch(p, 55, 84, st, roots, scale, chord_bias=0.50)
+            p = sanitize_copied_pitch(p, lead_lo, lead_hi, st, roots, scale, chord_bias=max(0.50, harmony_strictness * 0.70))
         if last_st_pitch == (st, p) and i % 2:
             continue
         if intensity > 0.70 and (i + variant) % 29 == 0 and n.start > 24 * bar:
@@ -874,33 +1051,99 @@ def build_reimagined_midi(
     lead.append(make_meta(song_end, 0x2F, b"", order=99)); new_tracks.append(lead)
 
     echo_src = all_notes[::max(1, len(all_notes)//1000)] if len(all_notes) > 1000 else all_notes
-    echo = setup_track("SUPPORT SAW ECHO", ch=8, program=88, volume=58, pan=72, reverb=52, chorus=44)
+    echo = setup_track(f"{style_name.upper()} SUPPORT ECHO", ch=8, program=style_program(style_preset, "echo", 88), volume=int(30 + brightness * 18 + delay_amount * 24), pan=72, reverb=int(22 + reverb_amount * 56), chorus=int(18 + brightness * 42))
     for i, n in enumerate(echo_src):
         if n.start >= song_end or i % 7 == 6:
             continue
         st = quantize_tick(n.start + (div//2 if i % 8 == 3 else 0), div // 4)
-        p = pitch_into_range(n.pitch, 52, 82)
+        p = pitch_into_range(n.pitch, max(44, lead_lo-8), lead_hi)
         if harmony_lock:
-            p = sanitize_copied_pitch(p, 52, 82, st, roots, scale, chord_bias=0.46)
+            p = sanitize_copied_pitch(p, max(44, lead_lo-8), lead_hi, st, roots, scale, chord_bias=max(0.46, harmony_strictness * 0.68))
         dur = max(div//6, int(n.duration * 0.72))
         add_note(echo, 8, p, st, min(dur, song_end-st), n.vel * 0.30)
     echo.append(make_meta(song_end, 0x2F, b"", order=99)); new_tracks.append(echo)
 
-    drums = setup_track("GRIDLOCK SYNTH DRUMS", ch=9, program=None, volume=122, pan=64, reverb=18, chorus=4)
+    drums = setup_track(f"{style_name.upper()} DRUMS - {drum_feel}", ch=9, program=None, volume=int(104 + distortion * 22), pan=64, reverb=int(8 + reverb_amount * 28), chorus=4)
     start_drum = 2 * bar
     for bs in range(start_drum, song_end, bar):
         bar_i = bs // bar
+
+        if drum_feel in ("ambient",):
+            # Very sparse pulse: more texture than beat.
+            if bar_i % 4 == 0:
+                add_note(drums, 9, 49, bs, div, 38)
+            if bar_i % 2 == 1:
+                add_note(drums, 9, 42, bs + 2*div + hat_swing, 70, 28)
+            continue
+
+        if drum_feel in ("dnb", "jungle"):
+            # Fast breakbeat impression: syncopated kick/snare with 16th hats.
+            for off, vel in [(0, 105), (div + div//2, 86), (2*div + div//2, 92)]:
+                add_note(drums, 9, 36, bs + off, 40, vel)
+            for off in [div, 3*div]:
+                add_note(drums, 9, 38, bs + off, 50, 108)
+                add_note(drums, 9, 39, bs + off + 12, 42, 60)
+            for s16 in range(16):
+                swing = hat_swing if s16 % 2 else 0
+                add_note(drums, 9, 42 if s16 % 4 else 44, bs + s16*(div//4) + swing, 22, 42 + (18 if s16 % 4 == 0 else 0))
+            if bar_i % 4 == 3:
+                for k, note in enumerate([47, 45, 43, 41, 43, 45]):
+                    add_note(drums, 9, note, bs + 3*div + k*(div//8), 40, 72-k*4)
+            continue
+
+        if drum_feel in ("halftime", "trap"):
+            # Half-time / trap-like pulse.
+            for off, vel in [(0, 112), (div//2, 82), (2*div + div//2, 96)]:
+                add_note(drums, 9, 36, bs + off, 46, vel)
+            add_note(drums, 9, 38, bs + 2*div, 58, 112)
+            hat_steps = 16 if drum_feel == "trap" else 8
+            for h in range(hat_steps):
+                step = div // (4 if hat_steps == 16 else 2)
+                swing = hat_swing if h % 2 else 0
+                add_note(drums, 9, 42, bs + h*step + swing, 20, 42 + (h % 3) * 6)
+            if bar_i % 4 == 3:
+                for k in range(6):
+                    add_note(drums, 9, 42, bs + 3*div + k*(div//12), 16, 48 + k*3)
+            continue
+
+        if drum_feel in ("breakbeat", "garage", "electro", "idm", "glitch", "trip_hop"):
+            # Syncopated broken beat family.
+            kicks = [0, div + div//2, 3*div] if drum_feel != "garage" else [0, div + div//2, 2*div + div//2]
+            if drum_feel == "trip_hop":
+                kicks = [0, 2*div + div//2]
+            for off in kicks:
+                add_note(drums, 9, 36, bs + off, 44, 98)
+            snare_pos = 2*div if drum_feel in ("trip_hop",) else div
+            add_note(drums, 9, 38, bs + snare_pos, 55, 106)
+            add_note(drums, 9, 38, bs + 3*div, 50, 88 if drum_feel != "garage" else 58)
+            for h in range(8):
+                if drum_feel in ("idm", "glitch") and (h + bar_i + fill_variant) % 5 == 0:
+                    add_note(drums, 9, 75, bs + h*(div//2) + rng.randrange(0, max(1, div//12)), 18, 36)
+                swing = hat_swing if h % 2 else 0
+                add_note(drums, 9, 42, bs + h*(div//2) + swing, 24, 42 + (h % 2)*16)
+            continue
+
+        # Four-on-the-floor family: synthwave, house, techno, trance, hardstyle, etc.
         for beat in range(4):
-            add_note(drums, 9, 36, bs + beat * div, 42, 108 if beat == 0 else 96)
-        if bar_i % 4 in (1, 3) and intensity > 0.4:
+            kick = 36
+            vel = 116 if beat == 0 else 102
+            if drum_feel == "hardstyle":
+                vel = 122
+            add_note(drums, 9, kick, bs + beat * div, 42, vel)
+        if drum_feel in ("techno", "acid", "psytrance", "trance", "house", "house_soft"):
+            for beat in range(4):
+                add_note(drums, 9, 46, bs + beat*div + div//2 + hat_swing, 34, 52 + int(brightness * 28))
+        if bar_i % 4 in (1, 3) and intensity > 0.4 and drum_feel not in ("house_soft",):
             add_note(drums, 9, 36, bs + 3*div + div//2, 36, 72)
         for beat in (1, 3):
             add_note(drums, 9, 38, bs + beat*div, 50, 100)
-            add_note(drums, 9, 39, bs + beat*div + 10, 48, 58)
+            if drum_feel not in ("techno", "acid"):
+                add_note(drums, 9, 39, bs + beat*div + 10, 48, 58)
         for e8 in range(8):
             swing = hat_swing if e8 % 2 == 1 else 0
-            add_note(drums, 9, 42, bs + e8*(div//2) + swing, 28, 52 + ((20 + fill_variant) if e8 % 2 == 0 else 0))
-        if intensity > 0.45:
+            note = 42 if drum_feel not in ("chiptune",) else 44
+            add_note(drums, 9, note, bs + e8*(div//2) + swing, 28, 46 + int(brightness*26) + ((12 + fill_variant) if e8 % 2 == 0 else 0))
+        if intensity > 0.45 and drum_feel not in ("techno", "acid"):
             add_note(drums, 9, 46, bs + 2*div + div//2 + div//16, 55, 58)
         if bar_i % 16 == 0:
             add_note(drums, 9, 49, bs, div, 68)
@@ -1200,26 +1443,48 @@ def process_file(
     intensity: float = 0.65,
     harmony_lock: bool = True,
     seed: int | None = None,
+    style_id: str = "synthwave",
+    random_style: bool = False,
     progress: Progress | None = None,
 ) -> dict:
     source = Path(source)
     seed = normalize_seed(seed)
+    style_preset = resolve_style_preset(style_id, random_style=random_style, seed=seed)
+    resolved_style_id = str(style_preset.get("id", "synthwave"))
+    resolved_style_name = str(style_preset.get("name", resolved_style_id))
+    source_hash = source_midi_hash(source)
     if output_dir is None:
         output_dir = source.parent / "reimagined_output"
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    if prefix is None or not prefix.strip():
-        prefix = f"{source.stem}_reimagined_synthwave_seed{seed}"
-    safe_prefix = "".join(ch if ch.isalnum() or ch in "-_. " else "_" for ch in prefix).strip() or "reimagined_synthwave"
+    if prefix is None or not str(prefix).strip():
+        prefix = "{source}_{style}_seed{seed}"
+    prefix = str(prefix)
+    prefix = (
+        prefix.replace("{source}", source.stem)
+              .replace("{seed}", str(seed))
+              .replace("{style}", safe_token(resolved_style_id))
+              .replace("{style_name}", safe_token(resolved_style_name))
+              .replace("{source_hash}", source_hash)
+    )
+    safe_prefix = "".join(ch if ch.isalnum() or ch in "-_. " else "_" for ch in prefix).strip() or f"{source.stem}_{resolved_style_id}_seed{seed}"
     mid = output_dir / f"{safe_prefix}.mid"
     wav = output_dir / f"{safe_prefix}.wav"
     mp3 = output_dir / f"{safe_prefix}.mp3"
     analysis_txt = output_dir / f"{safe_prefix}_analysis.txt"
-    midi_path, analysis = build_reimagined_midi(source, mid, intensity=intensity, harmony_lock=harmony_lock, seed=seed, progress=progress)
+    midi_path, analysis = build_reimagined_midi(source, mid, style=resolved_style_id, style_preset=style_preset, intensity=intensity, harmony_lock=harmony_lock, seed=seed, progress=progress)
     tonic, mode, scale, key_confidence = detect_key_and_mode(analysis)
     generation_summary = (
         "Generation settings:\n"
         f"  Seed: {seed}\n"
+        f"  Source MIDI hash: {source_hash}\n"
+        f"  Style mode: {'random' if random_style else 'manual'}\n"
+        f"  Requested style: {style_id}\n"
+        f"  Resolved style: {resolved_style_id} ({resolved_style_name})\n"
+        f"  Style preset version: {STYLE_PRESET_VERSION}\n"
+        f"  Style instruments: {style_preset.get('instruments', '')}\n"
+        f"  Style meter: {style_preset.get('meter', '')}\n"
+        f"  Style drum feel: {style_preset.get('drum_feel', '')}\n"
         f"  Harmony lock: {'ON' if harmony_lock else 'OFF'}\n"
         f"  Detected key/mode: {NOTE_NAMES[tonic]} {mode} (confidence {key_confidence:.2f})\n"
         f"  Intensity: {intensity:.2f}\n"
@@ -1240,6 +1505,10 @@ def process_file(
         "mp3": str(mp3_path) if mp3_path else None,
         "analysis": str(analysis_txt),
         "seed": seed,
+        "style": resolved_style_id,
+        "style_name": resolved_style_name,
+        "random_style": bool(random_style),
+        "source_hash": source_hash,
         "summary": full_summary,
     }
 
@@ -1255,6 +1524,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--intensity", type=float, default=0.65, help="Transformation intensity 0.0-1.0")
     ap.add_argument("--no-harmony-lock", action="store_true", help="Disable scale/chord correction. Default keeps copied notes harmonically locked.")
     ap.add_argument("--seed", type=int, default=None, help="Reproducible generation seed. Omit for a new random seed each run.")
+    ap.add_argument("--style", default="synthwave", help="Style preset id, e.g. synthwave, darksynth, techno, drum_and_bass. See app/styles/style_presets.json.")
+    ap.add_argument("--random-style", action="store_true", help="Resolve a random style deterministically from the generation seed.")
     args = ap.parse_args(argv)
     result = process_file(
         args.source,
@@ -1266,6 +1537,8 @@ def main(argv: list[str] | None = None) -> int:
         intensity=max(0.0, min(1.0, args.intensity)),
         harmony_lock=not args.no_harmony_lock,
         seed=args.seed,
+        style_id=args.style,
+        random_style=args.random_style,
         progress=print,
     )
     print(json.dumps(result, indent=2, ensure_ascii=False))

@@ -1,10 +1,10 @@
 @echo off
 setlocal EnableExtensions
 cd /d "%~dp0"
-title Synthwave MIDI Reimaginer GUI - Setup
+title Synthwave MIDI Reimaginer GUI v0.2.1 - Setup
 
 echo ============================================================
-echo Synthwave MIDI Reimaginer GUI - Windows Setup
+echo Synthwave MIDI Reimaginer GUI v0.2.1 - Windows Setup
 echo ============================================================
 
 where py >nul 2>nul

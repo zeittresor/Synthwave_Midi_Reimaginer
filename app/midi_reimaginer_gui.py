@@ -29,7 +29,7 @@ if str(APP_DIR) not in sys.path:
 
 import midi_reimaginer_core as core
 
-APP_VERSION = "0.1.5"
+APP_VERSION = "0.2.1"
 
 
 @dataclass
@@ -43,6 +43,8 @@ class JobSettings:
     intensity: float
     harmony_lock: bool
     seed: int | None
+    style_id: str
+    random_style: bool
 
 
 class AnalyzeWorker(QObject):
@@ -86,6 +88,8 @@ class RenderWorker(QObject):
                 intensity=s.intensity,
                 harmony_lock=s.harmony_lock,
                 seed=s.seed,
+                style_id=s.style_id,
+                random_style=s.random_style,
                 progress=lambda text: self.log.emit(str(text)),
             )
             self.finished.emit(result)
@@ -96,7 +100,7 @@ class RenderWorker(QObject):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle(f"Synthwave MIDI Reimaginer GUI v{APP_VERSION}")
+        self.setWindowTitle(f"Synthwave MIDI Reimaginer GUI v{APP_VERSION} - Multi Style")
         self.resize(1180, 780)
         self.last_result: dict | None = None
         self.worker_thread: QThread | None = None
@@ -112,7 +116,7 @@ class MainWindow(QMainWindow):
         main.setContentsMargins(16, 16, 16, 16)
         main.setSpacing(12)
 
-        title = QLabel("Synthwave MIDI Reimaginer")
+        title = QLabel("Synthwave MIDI Reimaginer - Multi Style")
         title.setObjectName("Title")
         title.setToolTip("Creates a cleaned-up, synthwave-inspired variation from a MIDI file and can render WAV/MP3 previews offline.")
         main.addWidget(title)
@@ -124,8 +128,8 @@ class MainWindow(QMainWindow):
         self.source_edit.setToolTip("The original MIDI file. The tool analyzes track roles such as bass, lead, arp, pad and drums.")
         self.output_edit = QLineEdit(str(ROOT_DIR / "output"))
         self.output_edit.setToolTip("Folder where the new MIDI, WAV, optional MP3, and analysis text are written.")
-        self.prefix_edit = QLineEdit("{source}_reimagined_synthwave_seed{seed}")
-        self.prefix_edit.setToolTip("Output filename prefix. Use {source} for the MIDI filename and {seed} for the actual generation seed. Keeping {seed} prevents accidental overwrites and makes versions reproducible.")
+        self.prefix_edit = QLineEdit("{source}_{style}_seed{seed}")
+        self.prefix_edit.setToolTip("Output filename prefix. Placeholders: {source}, {style}, {style_name}, {seed}, {source_hash}. Keeping {seed} and {style} prevents accidental overwrites and makes versions reproducible.")
         browse_src = QPushButton("Browse MIDI...")
         browse_src.clicked.connect(self.browse_source)
         browse_out = QPushButton("Output Folder...")
@@ -140,7 +144,32 @@ class MainWindow(QMainWindow):
         fg.addWidget(self.prefix_edit, 2, 1, 1, 2)
         main.addWidget(file_group)
 
-        options_group = QGroupBox("2. Render Options")
+        style_group = QGroupBox("2. Style Preset")
+        sg = QGridLayout(style_group)
+        self.style_combo = QComboBox()
+        self._styles = core.load_style_presets()
+        for style in self._styles:
+            label = f"{style.get('name', style.get('id'))}  [{style.get('id')}]"
+            self.style_combo.addItem(label, style.get("id"))
+        synth_idx = self.style_combo.findData("synthwave")
+        if synth_idx >= 0:
+            self.style_combo.setCurrentIndex(synth_idx)
+        self.style_combo.setToolTip("Selects the musical transformation style. Presets are loaded from app/styles/style_presets.json, so the feature is modular and expandable.")
+        self.random_style_cb = QCheckBox("Random Style from seed")
+        self.random_style_cb.setToolTip("If ON, the style is selected deterministically from the render seed. Same seed + same source + same style table reproduces the same resolved style.")
+        self.style_info_label = QLabel("")
+        self.style_info_label.setWordWrap(True)
+        self.style_info_label.setToolTip("Brief info from the selected style preset.")
+        self.style_combo.currentIndexChanged.connect(self._update_style_info)
+        self.random_style_cb.toggled.connect(self._update_style_info)
+        sg.addWidget(QLabel("Style:"), 0, 0)
+        sg.addWidget(self.style_combo, 0, 1)
+        sg.addWidget(self.random_style_cb, 0, 2)
+        sg.addWidget(self.style_info_label, 1, 0, 1, 3)
+        main.addWidget(style_group)
+        self._update_style_info()
+
+        options_group = QGroupBox("3. Render Options")
         og = QGridLayout(options_group)
         self.render_audio_cb = QCheckBox("Render WAV with internal synth")
         self.render_audio_cb.setChecked(True)
@@ -243,11 +272,13 @@ class MainWindow(QMainWindow):
         return f"""
 # Synthwave MIDI Reimaginer GUI v{APP_VERSION}
 
-This tool analyzes a MIDI file and creates a cleaned-up synthwave-inspired derivative version.
+This tool analyzes a MIDI file and creates a cleaned-up derivative electronic version using a selectable style preset.
 
 ## What it does
 
 - Detects likely **bass**, **lead/hook**, **arp/pluck**, **pad/chord source**, **drums**, and overly high/problematic tracks.
+- Lets you choose a modular **Style Preset** such as Synthwave, Darksynth, Techno, Drum and Bass, Ambient, Chiptune, etc.
+- Optional **Random Style from seed** mode picks a style reproducibly from the seed.
 - Quantizes musical parts to a cleaner grid.
 - Detects a likely key/scale and, with **Harmony lock**, snaps copied notes to compatible scale/chord tones.
 - Uses a reproducible **seed**. Auto mode chooses a new seed for every render; manual mode repeats the same version exactly.
@@ -267,7 +298,11 @@ MP3 export requires a **real ffmpeg binary**. The tool validates `ffmpeg -versio
 - `.mid` new MIDI arrangement
 - `.wav` internal synth preview
 - `.mp3` optional ffmpeg conversion
-- `_analysis.txt` text report of the detected MIDI structure
+- `_analysis.txt` text report of the detected MIDI structure, seed, source hash, requested style and resolved style
+
+## Modular style files
+
+The selectable styles live in `app/styles/style_presets.json`. A human-readable overview is also included as `app/styles/electronic_styles.csv`. You can add styles later by copying one JSON object and changing the id/values.
 """
 
     def _apply_dark_theme(self):
@@ -323,6 +358,23 @@ MP3 export requires a **real ffmpeg binary**. The tool validates `ffmpeg -versio
             self.status_label.setText(f"Status: {text.strip()[:160]}")
         self._log(text)
 
+    def _selected_style_id(self) -> str:
+        return str(self.style_combo.currentData() or "synthwave")
+
+    def _style_by_id(self, style_id: str) -> dict:
+        for style in getattr(self, "_styles", []):
+            if style.get("id") == style_id:
+                return style
+        return core.get_style_by_id(style_id)
+
+    def _update_style_info(self):
+        style = self._style_by_id(self._selected_style_id())
+        mode = "Random ON: resolved style is chosen from the seed at render time. " if getattr(self, "random_style_cb", None) and self.random_style_cb.isChecked() else ""
+        self.style_info_label.setText(
+            f"{mode}{style.get('info', '')} | BPM {style.get('bpm_min', '?')}-{style.get('bpm_max', '?')} | "
+            f"Drums: {style.get('drum_feel', '?')} | Instruments: {style.get('instruments', '')}"
+        )
+
     def browse_source(self):
         start = str(Path(self.source_edit.text()).parent) if self.source_edit.text() else str(ROOT_DIR)
         path, _ = QFileDialog.getOpenFileName(self, "Choose MIDI file", start, "MIDI files (*.mid *.midi);;All files (*.*)")
@@ -330,7 +382,7 @@ MP3 export requires a **real ffmpeg binary**. The tool validates `ffmpeg -versio
             self.source_edit.setText(path)
             src = Path(path)
             self.output_edit.setText(str(src.parent / "reimagined_output"))
-            self.prefix_edit.setText("{source}_reimagined_synthwave_seed{seed}")
+            self.prefix_edit.setText("{source}_{style}_seed{seed}")
 
     def browse_output(self):
         start = self.output_edit.text() or str(ROOT_DIR / "output")
@@ -423,8 +475,7 @@ MP3 export requires a **real ffmpeg binary**. The tool validates `ffmpeg -versio
                 self.seed_spin.setValue(seed)
             finally:
                 self._updating_seed_programmatically = False
-        prefix_template = self.prefix_edit.text().strip() or "{source}_reimagined_synthwave_seed{seed}"
-        prefix = prefix_template.replace("{source}", src.stem).replace("{seed}", str(seed))
+        prefix = self.prefix_edit.text().strip() or "{source}_{style}_seed{seed}"
         return JobSettings(
             source=src,
             output_dir=out,
@@ -435,6 +486,8 @@ MP3 export requires a **real ffmpeg binary**. The tool validates `ffmpeg -versio
             intensity=self.intensity_slider.value() / 100.0,
             harmony_lock=self.harmony_lock_cb.isChecked(),
             seed=seed,
+            style_id=self._selected_style_id(),
+            random_style=self.random_style_cb.isChecked(),
         )
 
     def render_current(self):
@@ -442,7 +495,7 @@ MP3 export requires a **real ffmpeg binary**. The tool validates `ffmpeg -versio
         if not settings:
             return
         self._set_busy(True)
-        self._log(f"Rendering new version from {settings.source.name} with seed {settings.seed} ...")
+        self._log(f"Rendering new version from {settings.source.name} with seed {settings.seed}, style {settings.style_id}{' (random)' if settings.random_style else ''} ...")
         self.worker_thread = QThread(self)
         worker = RenderWorker(settings)
         self.worker = worker  # keep a strong Python reference while the thread is running

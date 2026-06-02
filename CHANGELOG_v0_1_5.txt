@@ -1,0 +1,14 @@
+Synthwave MIDI Reimaginer GUI v0.1.5
+======================================
+
+Fixes
+-----
+- Seed field no longer becomes effectively unusable after playback/render workflow.
+- New Seed button now remains enabled even when Auto Seed is active.
+- Clicking New Seed now creates a fresh seed and switches Auto Seed off, so the visible seed is used reproducibly on the next render.
+- Editing the seed field now also switches Auto Seed off automatically.
+- Auto Seed still works as before: when enabled, every render chooses a fresh random seed and writes it into filename, MIDI metadata and analysis TXT.
+
+Notes
+-----
+- This is mainly a GUI/UX hotfix. The MIDI generation core is unchanged from v0.1.4.

@@ -1,0 +1,35 @@
+id;name;instrumente verwendet;takt;kurze style info;bpm_min;bpm_max;swing_amount;drum_feel;bass_center;lead_center;arp_density;pad_density;harmony_strictness
+synthwave;Synthwave;analog synth lead, juno pad, gated snare, synth bass, arpeggiator, tom fills;4/4;80er Retro-Sound mit warmen Pads, breiter Snare und melodischen Hooks;96;128;0.05;four_on_floor;45;68;0.72;0.72;0.84
+retrowave;Retrowave;poly synth, chorus bass, drum machine, bell synth, pad, electric piano;4/4;Nostalgischer 80er-Stil, weicher und poppiger als Synthwave;88;116;0.06;four_on_floor_soft;43;67;0.55;0.82;0.88
+outrun;Outrun;fast arpeggiator, pulse bass, bright lead, gated drums, toms, noise riser;4/4;Fahrender Neon-Racing-Sound mit starkem Puls und treibenden Arps;118;142;0.03;driving;46;72;0.92;0.58;0.82
+darksynth;Darksynth;distorted synth bass, aggressive lead, industrial drums, dark pad, noise hits;4/4;Düstere härtere Synthwave-Variante mit Horror- und Cyberpunk-Charakter;100;134;0.02;industrial_four;40;65;0.6;0.66;0.92
+cyberpunk;Cyberpunk;fm bass, metallic percussion, digital pad, glitch fx, distorted lead, sub bass;4/4;Kalter futuristischer Sound mit digitalen Texturen und urbaner Härte;96;132;0.01;industrial_four;42;66;0.7;0.55;0.88
+chillwave;Chillwave;soft pad, lo-fi drums, tape synth, muted bass, airy lead, vinyl noise;4/4;Verwaschener entspannter Retro-Sound mit viel Atmosphäre;72;102;0.09;downtempo;40;64;0.38;0.92;0.9
+vaporwave;Vaporwave;slowed sample pad, electric piano, soft drum machine, choir pad, tape fx;4/4;Verlangsamte nostalgische Ästhetik mit surrealem Lounge- und Mall-Sound;62;92;0.11;downtempo;38;62;0.24;1.0;0.94
+ambient;Ambient;drone pad, granular texture, soft bell, field recording, reverb synth, low sub;frei oder 4/4;Flächenorientierte Musik ohne starken Beat, Fokus auf Atmosphäre;55;90;0;ambient;36;60;0.14;1.0;0.98
+berlin_school;Berlin School;sequencer bass, analog arpeggiator, string pad, slow lead, modular synth;4/4;Tangerine-Dream-artige Sequencer-Musik mit langen Entwicklungen;84;118;0.01;sequencer;43;67;0.96;0.78;0.84
+electro;Electro;808 drums, sync bass, vocoder, fm lead, clap, cowbell;4/4;Früher elektronischer Funk mit kantigen Beats und Maschinen-Groove;110;132;0.08;electro;43;66;0.46;0.42;0.82
+techno;Techno;kick drum, offbeat hat, stab synth, rumble bass, ride, noise sweep;4/4;Minimaler cluborientierter Sound mit starkem Kick-Fokus;124;138;0;techno;39;62;0.34;0.34;0.9
+acid_techno;Acid Techno;303 acid bass, 909 kick, ride cymbal, resonant filter lead, snare roll;4/4;Treibender Techno mit sägendem resonantem 303-Basslauf;128;148;0;acid;42;66;0.88;0.28;0.78
+house;House;piano chord, organ bass, 909 drums, clap, vocal chop, string stab;4/4;Groovige Clubmusik mit warmen Akkorden und tanzbarem Beat;118;128;0.08;house;41;65;0.34;0.68;0.88
+deep_house;Deep House;soft chord, sub bass, muted kick, shaker, rhodes, atmospheric pad;4/4;Wärmerer atmosphärischer House mit tiefem Bass und smoothen Akkorden;112;124;0.1;house_soft;38;62;0.24;0.8;0.94
+trance;Trance;supersaw lead, rolling bass, gated pad, kick, snare build, arpeggiator;4/4;Euphorische melodische Clubmusik mit Builds, Breakdowns und großen Leads;132;144;0;trance;44;72;0.84;0.7;0.84
+psytrance;Psytrance;psy bass, kick, acid blip, fm percussion, squelch lead, riser;4/4;Schneller hypnotischer Sound mit Rolling-Bass und psychedelischen Effekten;138;150;0;psytrance;40;66;0.76;0.3;0.82
+drum_and_bass;Drum and Bass;reese bass, amen break, sub bass, fast hats, stab, atmospheric pad;4/4;Schnelle Breakbeat-Musik mit tiefem Bass und hektischer Drum-Programmierung;160;176;0.04;dnb;37;66;0.38;0.54;0.9
+liquid_dnb;Liquid Drum and Bass;soft reese, piano, pad, amen break, vocal chop, warm sub;4/4;Soulige melodische Drum-and-Bass-Variante mit weichen Flächen;160;174;0.05;dnb;37;65;0.28;0.8;0.94
+breakbeat;Breakbeat;funk break, synth bass, stab, scratch fx, clap, percussion loop;4/4;Gebrochene Beats statt Four-on-the-Floor, funky und rhythmisch verspielt;118;138;0.1;breakbeat;41;65;0.34;0.42;0.84
+uk_garage;UK Garage;2-step drums, organ bass, chord stab, vocal chop, shuffled hats;4/4;Shuffle-lastiger Clubsound mit versetzten Kicks und geschnittenen Vocals;126;138;0.18;garage;39;64;0.3;0.48;0.9
+dubstep;Dubstep;wobble bass, half-time drums, sub bass, growl synth, impact, riser;4/4;Halftime-orientierter Bassmusikstil mit schweren Drops und Wobble-Bässen;138;150;0.02;halftime;35;62;0.22;0.4;0.92
+future_bass;Future Bass;detuned chord, pitch lead, trap drums, sub bass, vocal chop, supersaw pad;4/4;Emotionaler moderner Bassmusikstil mit wackelnden Akkorden und hellen Leads;130;160;0.06;trap;37;72;0.32;0.86;0.92
+trap_edm;Trap EDM;808 sub, trap hats, snare roll, brass synth, pluck lead, riser;4/4;Elektronischer Trap mit 808-Bass, schnellen HiHat-Rolls und Drops;132;160;0.04;trap;34;66;0.3;0.38;0.88
+idm;IDM;glitch drums, fm synth, granular pad, odd arp, sub bass, click percussion;4/4 oder ungerade;Komplexere experimentelle Elektronik mit ungewöhnlichen Rhythmen;90;140;0.07;idm;39;66;0.56;0.55;0.86
+glitch;Glitch;clicks, cuts, digital noise, micro percussion, bitcrushed synth, granular fx;4/4 oder frei;Zerhackter digitaler Stil mit Fehlerklängen und rhythmischen Fragmenten;80;130;0.03;glitch;39;64;0.36;0.4;0.92
+chiptune;Chiptune;square lead, pulse bass, noise drums, arpeggio, triangle bass, 8bit fx;4/4;Videospielartiger 8-Bit/16-Bit-Sound mit einfachen Wellenformen;120;170;0;chiptune;43;72;0.88;0.28;0.86
+eurodance;Eurodance;piano stab, saw lead, dance bass, 909 drums, vocal hook, string pad;4/4;90er Dance-Sound mit eingängigen Hooks, Piano-Stabs und treibendem Beat;128;148;0;dance;43;72;0.58;0.62;0.86
+hardstyle;Hardstyle;distorted kick, reverse bass, supersaw lead, screech, snare build, choir hit;4/4;Harter Rave-Stil mit verzerrtem Kick und melodischen Leads;145;155;0;hardstyle;38;72;0.42;0.56;0.88
+industrial;Industrial;metal hit, distorted kick, noise pad, machine percussion, dark bass, siren;4/4;Mechanischer harter elektronischer Stil mit Noise- und Maschinenästhetik;90;132;0.01;industrial;38;62;0.26;0.44;0.92
+downtempo;Downtempo;soft drums, warm bass, pad, electric piano, texture, mellow lead;4/4;Entspannte langsamere Elektronik mit Atmosphäre und Groove;70;100;0.12;downtempo;38;62;0.2;0.88;0.94
+trip_hop;Trip Hop;dusty break, sub bass, string pad, electric piano, vinyl noise, vocal chop;4/4;Dunkler langsamer Beat-Stil mit Hip-Hop-, Jazz- und Film-Noir-Atmosphäre;72;100;0.14;trip_hop;36;60;0.18;0.72;0.96
+nu_disco;Nu Disco;disco bass, string synth, clap, funky guitar, brass stab, analog pad;4/4;Moderner elektronischer Disco-Stil mit Funk-Bass und glänzenden Akkorden;110;126;0.07;disco;42;67;0.32;0.66;0.86
+synthpop;Synthpop;poly synth, drum machine, synth bass, bright lead, pad, electronic tom;4/4;Songorientierter elektronischer Pop mit klaren Hooks und 80er-Einschlag;92;126;0.04;pop;42;68;0.38;0.74;0.9
+italo_disco;Italo Disco;analog bass, bright lead, drum machine, string pad, clap, arpeggiator;4/4;Melodischer 80er-Dance-Stil mit romantischem Synth-Charakter;110;128;0.03;dance;43;70;0.64;0.7;0.86

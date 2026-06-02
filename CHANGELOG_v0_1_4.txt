@@ -1,0 +1,16 @@
+Synthwave MIDI Reimaginer GUI v0.1.4
+====================================
+
+Fixes / Improvements:
+- Added reproducible generation seeds.
+- Auto seed is ON by default: every render gets a new seed.
+- Manual seed mode reproduces the same MIDI result exactly.
+- The used seed is written into the analysis TXT and embedded as MIDI text metadata.
+- Default output filename now contains {seed}, so repeated renders do not silently overwrite each other.
+- Added Harmony Lock improvements from v0.1.3: key/mode detection, ordered scale degrees, and chord-aware snapping for copied bass/lead/arp/pad material.
+- Reduced harmonic clashes caused by unordered pitch-class selection in earlier versions.
+- Added small seed-controlled arrangement variations: tempo nudge, hook rhythm variant, motif rotation, pluck/vibe phase, hat swing, and fill variant.
+
+Notes:
+- Harmony Lock should normally stay enabled.
+- If a result sounds good and you want to recreate it later, copy the Seed value from the analysis TXT into the manual Seed field and disable Auto Seed.
