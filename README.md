@@ -2,6 +2,8 @@
 
 Offline-friendly MIDI analysis, style-based re-arrangement and built-in WAV rendering.
 
+<img width="1185" height="1007" alt="grafik" src="https://github.com/user-attachments/assets/bada9da6-1cde-4c44-b4f0-ad2798f48652" />
+
 ## What this tool does
 
 The app analyzes a source `.mid` / `.midi` file, detects likely track roles such as bass, lead, arp, pad/problem-hook and drums, then creates a new derivative version using a selectable style preset.
