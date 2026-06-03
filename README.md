@@ -109,3 +109,8 @@ The onedir layout is intentional: it keeps modular styles, themes and languages 
 Run `install_windows.bat`, then `run_windows.bat`.
 
 For offline reuse after a first online setup, keep the `.venv` folder or prepare a wheelhouse with `prepare_wheelhouse_online.bat`.
+
+## Notes
+
+The Tool make use of the default mediaplayer (suggestion: VideoLAN / VLC). In some cases and using some specific styles the output might be a bit better using Midi-Playback instead of Wav/Mp3 playback (for me for ex. using "choral" preset with a good wavetable setup in VLC or a midi compatible backend).
+
