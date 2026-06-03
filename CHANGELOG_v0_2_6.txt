@@ -1,7 +1,0 @@
-Synthwave MIDI Reimaginer GUI v0.2.7
-
-- Added a large batch of new style presets requested by Flo / DJ Rhino Soulsystem and Mischa.
-- Added aliases and variants such as Jump Up, Gabba, French House, Tech House, Goa Trance, Drill, multiple Grime variants, Footwork, Jersey Club, Breakcore, Schranz, Happy Hardcore and more.
-- Style presets remain alphabetically sorted in the GUI and in app/styles/style_presets.json.
-- app/styles/electronic_styles.csv regenerated from the full preset list.
-- Core engine unchanged except modular presets; use existing drum feels and instrument mappings where possible.
