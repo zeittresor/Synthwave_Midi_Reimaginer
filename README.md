@@ -1,109 +1,77 @@
-# Synthwave MIDI Reimaginer GUI v0.2.3
+# Synthwave MIDI Reimaginer GUI v0.2.4
 
-Offline-friendly MIDI analysis, style-based re-arrangement and built-in WAV rendering.
+Offline-friendly PyQt6 tool for analyzing a source MIDI file and generating a new reimagined MIDI/WAV/optional MP3 version with selectable modular style presets.
 
-<img width="1185" height="1007" alt="grafik" src="https://github.com/user-attachments/assets/bada9da6-1cde-4c44-b4f0-ad2798f48652" />
+Source/project note for standalone copies:
+https://github.com/zeittresor/Synthwave_Midi_Reimaginer
 
-## What this tool does
+## New in v0.2.4
 
-The app analyzes a source `.mid` / `.midi` file, detects likely track roles such as bass, lead, arp, pad/problem-hook and drums, then creates a new derivative version using a selectable style preset.
+- Added more style presets, including:
+  - Bebop
+  - Blues
+  - Baroque
+  - Church Music
+  - Disco
+  - Epic Fantasy
+  - Flamenco
+  - Funk
+  - Gospel
+  - Gypsy Swing
+  - Hip Hop
+  - Holy Ambient
+  - Klezmer
+  - Lo-Fi Hip Hop
+  - Medieval
+  - Moombahton
+  - Modern Pop
+  - No Drums / Percussion
+  - R&B
+  - Reggaeton
+  - Simple Piano
+  - Soul
+  - Surf Rock
+  - Tango
+  - Western
+- Style presets are now alphabetically sorted in the JSON file and in the GUI drop-down.
+- Added drum engine support for:
+  - `no_drums` / `no_percussion` / `silent`
+  - `moombahton` / `reggaeton`
+  - `hip_hop`
+  - `funk`
+- Replaced the bundled example MIDI with a generated safe demo melody instead of the earlier uploaded test material.
+- Added source comments near the top of Python and batch files.
 
-It can render a WAV preview internally, so the result does not depend on the Windows MIDI wavetable. MP3 export is optional and only runs when a usable `ffmpeg.exe` is found.
+## Basic usage
 
-## New in v0.2.3
+1. Run `install_windows.bat` once.
+2. Run `run_windows.bat`.
+3. Select a `.mid` or `.midi` source file.
+4. Click **Analyze MIDI**.
+5. Choose a style, BPM, transformation intensity and repeated-note amount.
+6. Click **Create New Version**.
 
-### Three main generation sliders
+Generated files are written into the selected output folder.
 
-The render section now has three musical sliders:
+## Important controls
 
-- **Transformation intensity**
-  - `0%` = close to source MIDI / cleanup-oriented output
-  - `50%` = recognizable source material with a stronger selected-style arrangement
-  - `100%` = mostly regenerated song in the selected style, while still using source key and structure as a guide
+- **Style**: Selects the target musical direction.
+- **Random Style from seed**: Picks a style deterministically from the seed.
+- **Transformation intensity**: Controls how strongly the source is rewritten.
+- **BPM**: Controls the actual output tempo.
+- **Repeated note amount**: Controls how much repetitive note hammering is preserved or reduced.
+- **New random seed each render**: Default ON. Every render gets a new seed. Disable it to reproduce a previous result.
+- **Use style lead/melody instruments**: Default OFF. Enable it to force style-specific General MIDI lead/hook/pluck colors.
 
-- **BPM**
-  - Sets the target tempo used in the generated MIDI/WAV.
-  - The slider is initialized from the selected style's BPM range until the user changes it manually.
-  - The selected BPM is written to `_analysis.txt` and is part of reproducible settings.
+## Style files
 
-- **Repeated note amount**
-  - `0%` = aggressively reduce long monotone same-note loops by skipping or changing repeated notes.
-  - `50%` = balanced motif repetition.
-  - `100%` = preserve/allow repetitive patterns, useful for techno, trance, minimal, chiptune, etc.
+The style system is modular:
 
-### More styles
+- `app/styles/style_presets.json` is used by the engine.
+- `app/styles/electronic_styles.csv` is a readable overview table.
 
-The preset library now includes 57 styles total, including 22+ additional non-electronic or hybrid styles such as Darkwave, Occult Ritual, Meditation, Chillout, Classical, Orchestral Score, Traditional Panflute, Symphonic Metal, Metal, Ska, Punk Rock, Pop, Reggae, Dub, Flower Power, 70s Rock, 20s Jazz, Celtic, Bossa Nova, Latin Electro, Cinematic Trailer and Dream Pop.
-
-### Optional style lead/melody instruments
-
-A new checkbox **Use style lead/melody instruments** lets the selected style override the General MIDI programs for generated lead/hook/pluck/echo tracks. It is OFF by default so changing style mainly changes arrangement behavior first. Turn it ON when you want the lead/melody colors to follow the selected style more strongly, e.g. pan flute, brass, guitars, orchestra or choir-like leads.
-
-### Seed behavior
-
-`New random seed each render` remains ON by default. Turn it off when you want to reproduce a previous seed exactly.
-
-Same seed + same source MIDI + same style + same BPM + same repetition + same settings should reproduce the same MIDI.
-
-## Style Presets
-
-Styles are loaded from:
-
-```text
-app/styles/style_presets.json
-```
-
-A human-readable CSV overview is included at:
-
-```text
-app/styles/electronic_styles.csv
-```
-
-You can add a new style by copying an object in `style_presets.json`, changing the `id`, `name`, BPM range, instruments, `drum_feel`, tone ranges and effect values.
-
-## Seed and Random Style behavior
-
-When `New random seed each render` is checked, the GUI chooses a new seed for each render and writes that exact seed to:
-
-- filename, if `{seed}` is used in the prefix
-- MIDI metadata
-- `_analysis.txt`
-
-When `Random Style from seed` is checked, the style is chosen deterministically from the seed. That means:
-
-```text
-same seed + same style preset file = same resolved random style
-```
-
-## Output files
-
-A render can create:
-
-- `.mid` new MIDI arrangement
-- `.wav` internal audio preview
-- `.mp3` optional MP3 export if FFmpeg is available
-- `_analysis.txt` with track analysis, seed, source hash, style, BPM, repetition, intensity and rewrite amount
-
-## Windows usage
-
-First run:
-
-```bat
-install_windows.bat
-```
-
-Later runs:
-
-```bat
-run_windows.bat
-```
-
-To rebuild the local virtual environment:
-
-```bat
-reinstall_windows.bat
-```
+New styles can be added by appending objects to the JSON file. The engine fills missing fields with safe defaults, but the best results come from complete presets.
 
 ## Offline notes
 
-After the virtual environment and packages are installed, normal GUI use is offline-capable. For fully offline reinstallations, run `prepare_wheelhouse_online.bat` once on a machine with internet access so the dependency wheels are cached in `wheelhouse/`.
+After the first setup has downloaded wheels into the local environment or wheelhouse, the program can run offline. WAV rendering is internal and does not need the Windows wavetable. MP3 export is optional and needs a real `ffmpeg.exe`.

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# source: https://github.com/zeittresor/Synthwave_Midi_Reimaginer
 """
 Synthwave MIDI Reimaginer core engine.
 
@@ -194,7 +195,9 @@ def load_style_presets() -> list[dict]:
             "harmony_strictness": 0.84,
             "programs": {"bass": 38, "pluck": 5, "vibe": 11, "ticks": 115, "pad": 89, "hook": 80, "lead": 81, "echo": 88},
         })
-    return cleaned
+    # Keep the GUI drop-down stable, predictable and readable. Random-style
+    # resolution remains reproducible because it uses this deterministic order.
+    return sorted(cleaned, key=lambda s: str(s.get("name", s.get("id", ""))).casefold())
 
 
 def get_style_by_id(style_id: str | None) -> dict:
@@ -1395,6 +1398,17 @@ def build_reimagined_midi(
     # Drums: seed-dependent variations and fills grow with intensity.
     drums = setup_track(f"{style_name.upper()} DRUMS - {drum_feel}", ch=9, program=None, volume=int(100 + distortion * 22), pan=64, reverb=int(8 + reverb_amount * 28), chorus=4)
     start_drum = 2 * bar
+    if drum_feel in ("no_drums", "none", "no_percussion", "silent"):
+        # Explicit no-drums style. Keep an empty track for compatibility, but
+        # do not add audible percussion events.
+        drums.append(make_meta(song_end, 0x2F, b"", order=99))
+        new_tracks.append(drums)
+        reset = [make_meta(0, 0x03, b"RESET/SYSEX", order=0), make_meta(song_end, 0x2F, b"", order=99)]
+        new_tracks.append(reset)
+        out_mid.parent.mkdir(parents=True, exist_ok=True)
+        write_midi(out_mid, 1, div, new_tracks)
+        log(progress, f"MIDI geschrieben: {out_mid}")
+        return out_mid, analysis
     for bs in range(start_drum, song_end, bar):
         bar_i = bs // bar
         bar_rng = seeded_rng(seed, f"drums:{bar_i}:{drum_feel}")
@@ -1430,6 +1444,21 @@ def build_reimagined_midi(
             if bar_i % 4 == 3 or bar_rng.random() < 0.25 * rewrite:
                 for k, note in enumerate(bar_rng.choice([[45,43,41], [47,45,43,41], [50,47,45]])):
                     add_note(drums, 9, note, bs + 3*div + k*(div//5), 48, 76-k*5)
+            continue
+
+        if drum_feel in ("moombahton", "reggaeton"):
+            # Dembow/moombahton family. Slightly syncopated, useful for 100-115 BPM styles.
+            for off in [0, 2*div + div//2]:
+                add_note(drums, 9, 36, bs + off, 44, 92 + int(18*rewrite))
+            for off in [div, 2*div, 3*div]:
+                add_note(drums, 9, 38, bs + off, 52, 88 + int(14*rewrite))
+            for h in range(8):
+                swing = hat_swing if h % 2 else 0
+                note = 42 if h % 2 else 46
+                add_note(drums, 9, note, bs + h*(div//2) + swing, 22, 42 + int(18*rewrite) + (h % 3)*4)
+            if bar_i % 4 == 3 or bar_rng.random() < 0.30 * rewrite:
+                for k, note in enumerate(bar_rng.choice([[37, 38, 37], [75, 75, 38], [45, 43, 41]])):
+                    add_note(drums, 9, note, bs + 3*div + k*(div//6), 36, 58-k*4)
             continue
 
         if drum_feel in ("ska", "reggae", "dub"):
@@ -1528,16 +1557,22 @@ def build_reimagined_midi(
                     add_note(drums, 9, 42, bs + 3*div + k*(div//12), 16, 44 + k*3)
             continue
 
-        if drum_feel in ("breakbeat", "garage", "electro", "idm", "glitch", "trip_hop"):
+        if drum_feel in ("breakbeat", "garage", "electro", "idm", "glitch", "trip_hop", "hip_hop", "funk"):
             kick_options = [[0, div + div//2, 3*div], [0, div//2, 2*div + div//2], [0, 2*div + div//2]]
             kicks = kick_options[0] if rewrite < 0.35 else bar_rng.choice(kick_options)
             if drum_feel == "trip_hop" and rewrite < 0.60:
                 kicks = [0, 2*div + div//2]
+            if drum_feel == "hip_hop":
+                kicks = [0, div + div//2, 2*div + div//2] if rewrite < 0.55 else bar_rng.choice([[0, div + div//2, 2*div + div//2], [0, div//2, 2*div, 3*div + div//2]])
+            if drum_feel == "funk":
+                kicks = [0, div//2, div + div//2, 2*div + div//2, 3*div]
             for off in kicks:
                 add_note(drums, 9, 36, bs + off, 44, 92 + int(12 * rewrite))
-            snare_pos = 2*div if drum_feel in ("trip_hop",) else div
+            snare_pos = 2*div if drum_feel in ("trip_hop", "hip_hop") else div
             add_note(drums, 9, 38, bs + snare_pos, 55, 100 + int(12 * rewrite))
             add_note(drums, 9, 38, bs + 3*div, 50, 72 + int(22 * rewrite))
+            if drum_feel == "funk":
+                add_note(drums, 9, 37, bs + div + div//2, 34, 48 + int(16 * rewrite))
             for h in range(8):
                 if drum_feel in ("idm", "glitch") and (h + bar_i + fill_variant) % max(2, int(5 - 2*rewrite)) == 0:
                     add_note(drums, 9, 75, bs + h*(div//2) + bar_rng.randrange(0, max(1, div//12)), 18, 30 + int(22*rewrite))

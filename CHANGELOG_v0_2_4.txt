@@ -1,0 +1,15 @@
+Synthwave MIDI Reimaginer GUI v0.2.4
+===================================
+
+Style expansion and sorting update.
+
+Added:
+- 25 additional presets: Bebop, Blues, Baroque, Church Music, Disco, Epic Fantasy, Flamenco, Funk, Gospel, Gypsy Swing, Hip Hop, Holy Ambient, Klezmer, Lo-Fi Hip Hop, Medieval, Moombahton, Modern Pop, No Drums / Percussion, R&B, Reggaeton, Simple Piano, Soul, Surf Rock, Tango and Western.
+- Alphabetical sorting for style presets in style_presets.json and in the GUI drop-down.
+- Drum engine support for no-drums, moombahton/reggaeton, hip-hop and funk patterns.
+- Source comments near the top of code and batch files.
+- A generated safe demo MIDI replacing the earlier example material.
+
+Notes:
+- Random-style mode remains reproducible for a given seed and style table version.
+- No Drums / Percussion intentionally produces no audible drumkit/percussion track.

@@ -1,10 +1,11 @@
 @echo off
+REM source: https://github.com/zeittresor/Synthwave_Midi_Reimaginer
 setlocal EnableExtensions
 cd /d "%~dp0"
-title Synthwave MIDI Reimaginer GUI v0.2.2 - Setup
+title Synthwave MIDI Reimaginer GUI v0.2.4 - Setup
 
 echo ============================================================
-echo Synthwave MIDI Reimaginer GUI v0.2.2 - Windows Setup
+echo Synthwave MIDI Reimaginer GUI v0.2.4 - Windows Setup
 echo ============================================================
 
 where py >nul 2>nul

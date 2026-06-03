@@ -1,4 +1,5 @@
 @echo off
+REM source: https://github.com/zeittresor/Synthwave_Midi_Reimaginer
 setlocal EnableExtensions
 cd /d "%~dp0"
 title Synthwave MIDI Reimaginer GUI - Reinstall

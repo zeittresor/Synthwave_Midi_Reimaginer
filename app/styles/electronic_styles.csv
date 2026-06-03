@@ -1,58 +1,83 @@
 name;instrumente verwendet;takt;kurze style info
-Synthwave;analog synth lead, juno pad, gated snare, synth bass, arpeggiator, tom fills;4/4;80er Retro-Sound mit warmen Pads, breiter Snare und melodischen Hooks
-Retrowave;poly synth, chorus bass, drum machine, bell synth, pad, electric piano;4/4;Nostalgischer 80er-Stil, weicher und poppiger als Synthwave
-Outrun;fast arpeggiator, pulse bass, bright lead, gated drums, toms, noise riser;4/4;Fahrender Neon-Racing-Sound mit starkem Puls und treibenden Arps
-Darksynth;distorted synth bass, aggressive lead, industrial drums, dark pad, noise hits;4/4;Düstere härtere Synthwave-Variante mit Horror- und Cyberpunk-Charakter
-Cyberpunk;fm bass, metallic percussion, digital pad, glitch fx, distorted lead, sub bass;4/4;Kalter futuristischer Sound mit digitalen Texturen und urbaner Härte
-Chillwave;soft pad, lo-fi drums, tape synth, muted bass, airy lead, vinyl noise;4/4;Verwaschener entspannter Retro-Sound mit viel Atmosphäre
-Vaporwave;slowed sample pad, electric piano, soft drum machine, choir pad, tape fx;4/4;Verlangsamte nostalgische Ästhetik mit surrealem Lounge- und Mall-Sound
-Ambient;drone pad, granular texture, soft bell, field recording, reverb synth, low sub;frei oder 4/4;Flächenorientierte Musik ohne starken Beat, Fokus auf Atmosphäre
-Berlin School;sequencer bass, analog arpeggiator, string pad, slow lead, modular synth;4/4;Tangerine-Dream-artige Sequencer-Musik mit langen Entwicklungen
-Electro;808 drums, sync bass, vocoder, fm lead, clap, cowbell;4/4;Früher elektronischer Funk mit kantigen Beats und Maschinen-Groove
-Techno;kick drum, offbeat hat, stab synth, rumble bass, ride, noise sweep;4/4;Minimaler cluborientierter Sound mit starkem Kick-Fokus
-Acid Techno;303 acid bass, 909 kick, ride cymbal, resonant filter lead, snare roll;4/4;Treibender Techno mit sägendem resonantem 303-Basslauf
-House;piano chord, organ bass, 909 drums, clap, vocal chop, string stab;4/4;Groovige Clubmusik mit warmen Akkorden und tanzbarem Beat
-Deep House;soft chord, sub bass, muted kick, shaker, rhodes, atmospheric pad;4/4;Wärmerer atmosphärischer House mit tiefem Bass und smoothen Akkorden
-Trance;supersaw lead, rolling bass, gated pad, kick, snare build, arpeggiator;4/4;Euphorische melodische Clubmusik mit Builds, Breakdowns und großen Leads
-Psytrance;psy bass, kick, acid blip, fm percussion, squelch lead, riser;4/4;Schneller hypnotischer Sound mit Rolling-Bass und psychedelischen Effekten
-Drum and Bass;reese bass, amen break, sub bass, fast hats, stab, atmospheric pad;4/4;Schnelle Breakbeat-Musik mit tiefem Bass und hektischer Drum-Programmierung
-Liquid Drum and Bass;soft reese, piano, pad, amen break, vocal chop, warm sub;4/4;Soulige melodische Drum-and-Bass-Variante mit weichen Flächen
-Breakbeat;funk break, synth bass, stab, scratch fx, clap, percussion loop;4/4;Gebrochene Beats statt Four-on-the-Floor, funky und rhythmisch verspielt
-UK Garage;2-step drums, organ bass, chord stab, vocal chop, shuffled hats;4/4;Shuffle-lastiger Clubsound mit versetzten Kicks und geschnittenen Vocals
-Dubstep;wobble bass, half-time drums, sub bass, growl synth, impact, riser;4/4;Halftime-orientierter Bassmusikstil mit schweren Drops und Wobble-Bässen
-Future Bass;detuned chord, pitch lead, trap drums, sub bass, vocal chop, supersaw pad;4/4;Emotionaler moderner Bassmusikstil mit wackelnden Akkorden und hellen Leads
-Trap EDM;808 sub, trap hats, snare roll, brass synth, pluck lead, riser;4/4;Elektronischer Trap mit 808-Bass, schnellen HiHat-Rolls und Drops
-IDM;glitch drums, fm synth, granular pad, odd arp, sub bass, click percussion;4/4 oder ungerade;Komplexere experimentelle Elektronik mit ungewöhnlichen Rhythmen
-Glitch;clicks, cuts, digital noise, micro percussion, bitcrushed synth, granular fx;4/4 oder frei;Zerhackter digitaler Stil mit Fehlerklängen und rhythmischen Fragmenten
-Chiptune;square lead, pulse bass, noise drums, arpeggio, triangle bass, 8bit fx;4/4;Videospielartiger 8-Bit/16-Bit-Sound mit einfachen Wellenformen
-Eurodance;piano stab, saw lead, dance bass, 909 drums, vocal hook, string pad;4/4;90er Dance-Sound mit eingängigen Hooks, Piano-Stabs und treibendem Beat
-Hardstyle;distorted kick, reverse bass, supersaw lead, screech, snare build, choir hit;4/4;Harter Rave-Stil mit verzerrtem Kick und melodischen Leads
-Industrial;metal hit, distorted kick, noise pad, machine percussion, dark bass, siren;4/4;Mechanischer harter elektronischer Stil mit Noise- und Maschinenästhetik
-Downtempo;soft drums, warm bass, pad, electric piano, texture, mellow lead;4/4;Entspannte langsamere Elektronik mit Atmosphäre und Groove
-Trip Hop;dusty break, sub bass, string pad, electric piano, vinyl noise, vocal chop;4/4;Dunkler langsamer Beat-Stil mit Hip-Hop-, Jazz- und Film-Noir-Atmosphäre
-Nu Disco;disco bass, string synth, clap, funky guitar, brass stab, analog pad;4/4;Moderner elektronischer Disco-Stil mit Funk-Bass und glänzenden Akkorden
-Synthpop;poly synth, drum machine, synth bass, bright lead, pad, electronic tom;4/4;Songorientierter elektronischer Pop mit klaren Hooks und 80er-Einschlag
-Italo Disco;analog bass, bright lead, drum machine, string pad, clap, arpeggiator;4/4;Melodischer 80er-Dance-Stil mit romantischem Synth-Charakter
-Darkwave;dark synth lead, chorus bass, gothic pad, electronic toms, minor piano, gated drums;4/4;Düsterer Post-Punk/Synth-Sound mit melancholischen Leads und dunklen Pads
-Occult Ritual;choir pad, low drone, ritual toms, bell synth, dark organ, sub bass;4/4;Rituell-düstere Klangwelt mit Chorflächen, Glocken und schweren tiefen Akzenten
-Meditation;soft pad, pan flute, glass bell, drone, warm sub, wind texture;frei oder 4/4;Sehr ruhiger meditativer Stil mit langen Flächen, wenigen Anschlägen und viel Hall
-Chillout;soft drums, warm pad, electric piano, mellow lead, sub bass, light percussion;4/4;Entspannter Lounge-/Chillout-Sound mit weichen Akkorden und zurückhaltendem Beat
-Classical;piano, strings, flute, oboe, contrabass, timpani;4/4;Klassisch angehauchte Bearbeitung mit Piano-/Streicher-Voicings und wenig elektronischer Härte
-Orchestral Score;string ensemble, brass, timpani, choir, flute, contrabass;4/4;Cinematische Orchesterfassung mit breiten Streichern, Timpani und dramatischen Akzenten
-Traditional Panflute;pan flute, nylon guitar, soft strings, hand percussion, warm bass, bells;4/4;Folkloristisch-weiche Panflöten-Variante mit natürlicheren Melodiefarben
-Symphonic Metal;distorted guitar, orchestral strings, choir, rock drums, synth bass, lead guitar;4/4;Metal-Groove mit orchestralen Pads und dramatischem Hook-Fokus
-Metal;distorted guitar, picked bass, rock drums, power chord stab, lead guitar, crash cymbal;4/4;Harte gitarrenartige Fassung mit Power-Chord-Akzenten und kräftigem Drum-Groove
-Ska;organ, clean guitar skank, brass section, walking bass, drums, sax lead;4/4;Offbeat-betonter Ska-Groove mit kurzen Akkordstabs und lockerer Bläsermelodie
-Punk Rock;overdriven guitar, picked bass, fast drums, shout lead, power chords, crash cymbal;4/4;Schneller direkter Punkrock-Umbau mit einfachen kraftvollen Patterns
-Pop;bright piano, synth bass, clean lead, clap drums, soft pad, vocal-like hook;4/4;Eingängige poppige Bearbeitung mit klarer Hook und weniger sperrigen Patterns
-Reggae;organ bubble, offbeat guitar, deep bass, rimshot drums, brass stab, dub delay;4/4;Reggae-Groove mit Offbeat-Akkorden, tiefer Basslinie und entspannter Rhythmik
-Dub;deep bass, tape delay stab, organ, spring reverb snare, echo fx, muted guitar;4/4;Dub-Version mit Bassfokus, viel Echo, ausgedünnten Elementen und räumlichen Stabs
-Flower Power;organ, sitar, tambourine, warm bass, flute, soft guitar;4/4;Psychedelisch-freundlicher 60s/Flower-Power-Stil mit Organ, Flöte und schwebenden Farben
-70s Rock;electric guitar, hammond organ, electric bass, rock drums, string machine, lead guitar;4/4;Klassischer 70er-Rock-Vibe mit Orgel, Gitarrenfarben und trockenem Groove
 20s Jazz;upright bass, honky tonk piano, clarinet, muted trumpet, brush drums, banjo;4/4;1920er-Jazz-Anlehnung mit Swing, Walking-Bass-Idee und akustischeren GM-Klängen
-Country Folk;acoustic guitar, harmonica, fiddle, upright bass, brush drums, soft piano;4/4;Akustischere Folk/Country-Bearbeitung mit einfachen Akkorden und warmem Lead
-Celtic;tin whistle, fiddle, harp, bodhran, drone, acoustic bass;4/4;Keltisch inspirierte Variante mit Whistle/Fiddle-Farben und tanzendem Puls
+70s Rock;electric guitar, hammond organ, electric bass, rock drums, string machine, lead guitar;4/4;Klassischer 70er-Rock-Vibe mit Orgel, Gitarrenfarben und trockenem Groove
+Acid Techno;303 acid bass, 909 kick, ride cymbal, resonant filter lead, snare roll;4/4;Treibender Techno mit sägendem resonantem 303-Basslauf
+Ambient;drone pad, granular texture, soft bell, field recording, reverb synth, low sub;frei oder 4/4;Flächenorientierte Musik ohne starken Beat, Fokus auf Atmosphäre
+Baroque;harpsichord, chamber strings, cello, flute, oboe, light timpani;4/4;Kontrapunktisch wirkender Klassik-Stil mit Cembalo-/Streicherfarben und strengeren Harmonien.
+Bebop;upright bass, ride cymbal, jazz piano, trumpet, saxophone, brush snare;4/4;Schneller Jazz-Stil mit Walking-Bass, akzentuierten Bläser-Lines und lebendiger Swing-Phrasierung.
+Berlin School;sequencer bass, analog arpeggiator, string pad, slow lead, modular synth;4/4;Tangerine-Dream-artige Sequencer-Musik mit langen Entwicklungen
+Blues;electric piano, clean guitar, harmonica, upright bass, shuffle drums, organ;4/4;Blues-orientiertes Preset mit Shuffle-Gefühl, einfachen Hook-Lines und warmen Lead-Instrumenten.
 Bossa Nova;nylon guitar, electric piano, soft bass, brush drums, flute, warm pad;4/4;Sanfte Bossa-Nova-Anmutung mit synkopierter Begleitung und weichem Lead
-Latin Electro;latin percussion, synth bass, brass stab, pluck lead, piano montuno, pad;4/4;Elektronisch-lateinischer Groove mit Percussion, Stabs und bewegter Basslinie
+Breakbeat;funk break, synth bass, stab, scratch fx, clap, percussion loop;4/4;Gebrochene Beats statt Four-on-the-Floor, funky und rhythmisch verspielt
+Celtic;tin whistle, fiddle, harp, bodhran, drone, acoustic bass;4/4;Keltisch inspirierte Variante mit Whistle/Fiddle-Farben und tanzendem Puls
+Chillout;soft drums, warm pad, electric piano, mellow lead, sub bass, light percussion;4/4;Entspannter Lounge-/Chillout-Sound mit weichen Akkorden und zurückhaltendem Beat
+Chillwave;soft pad, lo-fi drums, tape synth, muted bass, airy lead, vinyl noise;4/4;Verwaschener entspannter Retro-Sound mit viel Atmosphäre
+Chiptune;square lead, pulse bass, noise drums, arpeggio, triangle bass, 8bit fx;4/4;Videospielartiger 8-Bit/16-Bit-Sound mit einfachen Wellenformen
+Church Music;church organ, choir, bells, strings, soft timpani, reverberant pad;4/4;Kirchenmusik-orientiertes Preset mit Orgel, Chorflächen, viel Hall und zurückhaltendem Puls.
 Cinematic Trailer;huge drums, brass, string ostinato, choir, low synth, impact hits;4/4;Trailerartige große Version mit Ostinato, Impacts, Chor und dramatischer Steigerung
+Classical;piano, strings, flute, oboe, contrabass, timpani;4/4;Klassisch angehauchte Bearbeitung mit Piano-/Streicher-Voicings und wenig elektronischer Härte
+Country Folk;acoustic guitar, harmonica, fiddle, upright bass, brush drums, soft piano;4/4;Akustischere Folk/Country-Bearbeitung mit einfachen Akkorden und warmem Lead
+Cyberpunk;fm bass, metallic percussion, digital pad, glitch fx, distorted lead, sub bass;4/4;Kalter futuristischer Sound mit digitalen Texturen und urbaner Härte
+Darksynth;distorted synth bass, aggressive lead, industrial drums, dark pad, noise hits;4/4;Düstere härtere Synthwave-Variante mit Horror- und Cyberpunk-Charakter
+Darkwave;dark synth lead, chorus bass, gothic pad, electronic toms, minor piano, gated drums;4/4;Düsterer Post-Punk/Synth-Sound mit melancholischen Leads und dunklen Pads
+Deep House;soft chord, sub bass, muted kick, shaker, rhodes, atmospheric pad;4/4;Wärmerer atmosphärischer House mit tiefem Bass und smoothen Akkorden
+Disco;disco bass, string machine, brass stab, clavinet, clap, clean guitar;4/4;Klassischer 70er-Disco-Groove mit Funk-Bass, Streichern, Claps und glänzenden Hooks.
+Downtempo;soft drums, warm bass, pad, electric piano, texture, mellow lead;4/4;Entspannte langsamere Elektronik mit Atmosphäre und Groove
 Dream Pop;chorus guitar, airy pad, soft bass, reverb drums, bell lead, washed piano;4/4;Weicher verwaschener Pop-Sound mit viel Hall, schwebenden Pads und sanfter Hook
+Drum and Bass;reese bass, amen break, sub bass, fast hats, stab, atmospheric pad;4/4;Schnelle Breakbeat-Musik mit tiefem Bass und hektischer Drum-Programmierung
+Dub;deep bass, tape delay stab, organ, spring reverb snare, echo fx, muted guitar;4/4;Dub-Version mit Bassfokus, viel Echo, ausgedünnten Elementen und räumlichen Stabs
+Dubstep;wobble bass, half-time drums, sub bass, growl synth, impact, riser;4/4;Halftime-orientierter Bassmusikstil mit schweren Drops und Wobble-Bässen
+Electro;808 drums, sync bass, vocoder, fm lead, clap, cowbell;4/4;Früher elektronischer Funk mit kantigen Beats und Maschinen-Groove
+Epic Fantasy;orchestral strings, french horn, choir, harp, timpani, flute;4/4;Fantasy-/Adventure-Score-Preset mit orchestralen Farben, breiten Akkorden und heroischen Melodiebögen.
+Eurodance;piano stab, saw lead, dance bass, 909 drums, vocal hook, string pad;4/4;90er Dance-Sound mit eingängigen Hooks, Piano-Stabs und treibendem Beat
+Flamenco;nylon guitar, hand clap, acoustic bass, trumpet, accordion, castanet-like ticks;4/4;Spanisch gefärbtes Preset mit Gitarrenanschlag, perkussiven Akzenten und leidenschaftlichen Melodien.
+Flower Power;organ, sitar, tambourine, warm bass, flute, soft guitar;4/4;Psychedelisch-freundlicher 60s/Flower-Power-Stil mit Organ, Flöte und schwebenden Farben
+Funk;slap bass, clavinet, wah guitar, brass stab, tight drums, organ;4/4;Funk-Preset mit synkopiertem Bass, kurzen Akkord-Stabs und rhythmischem Call-and-Response.
+Future Bass;detuned chord, pitch lead, trap drums, sub bass, vocal chop, supersaw pad;4/4;Emotionaler moderner Bassmusikstil mit wackelnden Akkorden und hellen Leads
+Glitch;clicks, cuts, digital noise, micro percussion, bitcrushed synth, granular fx;4/4 oder frei;Zerhackter digitaler Stil mit Fehlerklängen und rhythmischen Fragmenten
+Gospel;gospel organ, choir, piano, electric bass, handclaps, warm brass;4/4;Gospel-orientierter Stil mit Orgel, Chorantworten, warmem Piano und getragenem Backbeat.
+Gypsy Swing;acoustic guitar, violin, accordion, upright bass, clarinet, brushed drums;4/4;Gypsy-Jazz/Swing-Preset mit akustischer Rhythmusgitarre, Geige, Akkordeon und beweglichen Lead-Lines.
+Hardstyle;distorted kick, reverse bass, supersaw lead, screech, snare build, choir hit;4/4;Harter Rave-Stil mit verzerrtem Kick und melodischen Leads
+Hip Hop;808 bass, boom bap drums, electric piano, sample pad, vinyl noise, muted lead;4/4;Beat-orientiertes Hip-Hop-Preset mit 808-/Subbass, laid-back Drums und loopartigen Harmonien.
+Holy Ambient;choir pad, church organ, soft bells, drone, strings, shimmer reverb;frei oder 4/4;Sakrales Ambient-Preset ohne starken Groove, mit Chorflächen, Orgel und schwebenden Halltexturen.
+House;piano chord, organ bass, 909 drums, clap, vocal chop, string stab;4/4;Groovige Clubmusik mit warmen Akkorden und tanzbarem Beat
+IDM;glitch drums, fm synth, granular pad, odd arp, sub bass, click percussion;4/4 oder ungerade;Komplexere experimentelle Elektronik mit ungewöhnlichen Rhythmen
+Industrial;metal hit, distorted kick, noise pad, machine percussion, dark bass, siren;4/4;Mechanischer harter elektronischer Stil mit Noise- und Maschinenästhetik
+Italo Disco;analog bass, bright lead, drum machine, string pad, clap, arpeggiator;4/4;Melodischer 80er-Dance-Stil mit romantischem Synth-Charakter
+Klezmer;clarinet, accordion, violin, tuba bass, hand percussion, acoustic guitar;4/4;Klezmer-inspiriertes Preset mit Klarinetten-Lead, Akkordeon und tänzerisch-molligen Wendungen.
+Latin Electro;latin percussion, synth bass, brass stab, pluck lead, piano montuno, pad;4/4;Elektronisch-lateinischer Groove mit Percussion, Stabs und bewegter Basslinie
+Liquid Drum and Bass;soft reese, piano, pad, amen break, vocal chop, warm sub;4/4;Soulige melodische Drum-and-Bass-Variante mit weichen Flächen
+Lo-Fi Hip Hop;dusty drums, soft electric piano, muted bass, tape pad, vinyl crackle, mellow lead;4/4;Entspannter Lo-Fi-Hip-Hop-Stil mit warmen Akkorden, reduziertem Beat und absichtlich weicher Klangfarbe.
+Medieval;recorder, lute, harp, drone, frame drum, chamber strings;3/4 oder 4/4;Mittelalterlich angehauchtes Preset mit Flöten, Lauten-/Harfenfarben und modaler Harmonik.
+Meditation;soft pad, pan flute, glass bell, drone, warm sub, wind texture;frei oder 4/4;Sehr ruhiger meditativer Stil mit langen Flächen, wenigen Anschlägen und viel Hall
+Metal;distorted guitar, picked bass, rock drums, power chord stab, lead guitar, crash cymbal;4/4;Harte gitarrenartige Fassung mit Power-Chord-Akzenten und kräftigem Drum-Groove
+Modern Pop;clean synth bass, piano, pluck lead, soft pad, tight drums, vocal-like hook;4/4;Moderner Pop-Stil mit klaren Hooks, kontrolliertem Groove, sauberen Akkorden und radiotauglicher Struktur.
+Moombahton;dembow drums, warm sub bass, pluck lead, brass hit, vocal chop, latin percussion;4/4;Moombahton-Preset mit langsamem Dancehall-/Dembow-Groove, elektronischen Plucks und warmem Subbass.
+No Drums / Percussion;soft pad, piano, bass drone, strings, bell lead, ambient texture;frei oder 4/4;"Explizit ohne hörbare Drumsets oder Percussion; geeignet für ruhige, schwebende oder reine Melodie-/Akkordvarianten."
+Nu Disco;disco bass, string synth, clap, funky guitar, brass stab, analog pad;4/4;Moderner elektronischer Disco-Stil mit Funk-Bass und glänzenden Akkorden
+Occult Ritual;choir pad, low drone, ritual toms, bell synth, dark organ, sub bass;4/4;Rituell-düstere Klangwelt mit Chorflächen, Glocken und schweren tiefen Akzenten
+Orchestral Score;string ensemble, brass, timpani, choir, flute, contrabass;4/4;Cinematische Orchesterfassung mit breiten Streichern, Timpani und dramatischen Akzenten
+Outrun;fast arpeggiator, pulse bass, bright lead, gated drums, toms, noise riser;4/4;Fahrender Neon-Racing-Sound mit starkem Puls und treibenden Arps
+Pop;bright piano, synth bass, clean lead, clap drums, soft pad, vocal-like hook;4/4;Eingängige poppige Bearbeitung mit klarer Hook und weniger sperrigen Patterns
+Psytrance;psy bass, kick, acid blip, fm percussion, squelch lead, riser;4/4;Schneller hypnotischer Sound mit Rolling-Bass und psychedelischen Effekten
+Punk Rock;overdriven guitar, picked bass, fast drums, shout lead, power chords, crash cymbal;4/4;Schneller direkter Punkrock-Umbau mit einfachen kraftvollen Patterns
+R&B;electric piano, smooth bass, soft drums, warm pad, muted guitar, vocal-like lead;4/4;Sanfter R&B-orientierter Stil mit warmen Akkorden, geschmeidigem Bass und reduzierten melodischen Hooks.
+Reggae;organ bubble, offbeat guitar, deep bass, rimshot drums, brass stab, dub delay;4/4;Reggae-Groove mit Offbeat-Akkorden, tiefer Basslinie und entspannter Rhythmik
+Reggaeton;dembow drums, sub bass, latin pluck, brass stab, vocal chop, percussion;4/4;Reggaeton-/Dembow-Preset mit prägnantem Rhythmus, Subbass und kurzen melodischen Hooks.
+Retrowave;poly synth, chorus bass, drum machine, bell synth, pad, electric piano;4/4;Nostalgischer 80er-Stil, weicher und poppiger als Synthwave
+Simple Piano;acoustic piano, soft bass, sparse strings, no drums, light bell, room reverb;4/4;Sehr einfaches Piano-Preset mit wenig Ablenkung, geeignet für klare Melodie-/Akkordableitungen ohne Drum-Groove.
+Ska;organ, clean guitar skank, brass section, walking bass, drums, sax lead;4/4;Offbeat-betonter Ska-Groove mit kurzen Akkordstabs und lockerer Bläsermelodie
+Soul;electric piano, organ, warm bass, brass section, soft drums, guitar comp;4/4;Souliges Preset mit warmen Tasteninstrumenten, Bass-Groove und call-and-response-artigen Hooks.
+Surf Rock;spring guitar, electric bass, organ, rock drums, tremolo lead, crash cymbal;4/4;Surf-Rock-Preset mit heller Gitarrenmelodie, treibendem Beat und leicht trashiger Retro-Energie.
+Symphonic Metal;distorted guitar, orchestral strings, choir, rock drums, synth bass, lead guitar;4/4;Metal-Groove mit orchestralen Pads und dramatischem Hook-Fokus
+Synthpop;poly synth, drum machine, synth bass, bright lead, pad, electronic tom;4/4;Songorientierter elektronischer Pop mit klaren Hooks und 80er-Einschlag
+Synthwave;analog synth lead, juno pad, gated snare, synth bass, arpeggiator, tom fills;4/4;80er Retro-Sound mit warmen Pads, breiter Snare und melodischen Hooks
+Tango;accordion, strings, upright bass, piano, hand percussion, violin lead;4/4;Tango-inspiriertes Preset mit Akkordeon, Streicherstabs und dramatischer rhythmischer Betonung.
+Techno;kick drum, offbeat hat, stab synth, rumble bass, ride, noise sweep;4/4;Minimaler cluborientierter Sound mit starkem Kick-Fokus
+Traditional Panflute;pan flute, nylon guitar, soft strings, hand percussion, warm bass, bells;4/4;Folkloristisch-weiche Panflöten-Variante mit natürlicheren Melodiefarben
+Trance;supersaw lead, rolling bass, gated pad, kick, snare build, arpeggiator;4/4;Euphorische melodische Clubmusik mit Builds, Breakdowns und großen Leads
+Trap EDM;808 sub, trap hats, snare roll, brass synth, pluck lead, riser;4/4;Elektronischer Trap mit 808-Bass, schnellen HiHat-Rolls und Drops
+Trip Hop;dusty break, sub bass, string pad, electric piano, vinyl noise, vocal chop;4/4;Dunkler langsamer Beat-Stil mit Hip-Hop-, Jazz- und Film-Noir-Atmosphäre
+UK Garage;2-step drums, organ bass, chord stab, vocal chop, shuffled hats;4/4;Shuffle-lastiger Clubsound mit versetzten Kicks und geschnittenen Vocals
+Vaporwave;slowed sample pad, electric piano, soft drum machine, choir pad, tape fx;4/4;Verlangsamte nostalgische Ästhetik mit surrealem Lounge- und Mall-Sound
+Western;clean guitar, harmonica, upright bass, brushed drums, whistle lead, strings;4/4;Western-/Americana-Preset mit Gitarren, Mundharmonika, offenem Raumgefühl und einfachem Groove.

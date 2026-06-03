@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# source: https://github.com/zeittresor/Synthwave_Midi_Reimaginer
 """
 PyQt6 GUI for Synthwave MIDI Reimaginer.
 """
@@ -29,7 +30,7 @@ if str(APP_DIR) not in sys.path:
 
 import midi_reimaginer_core as core
 
-APP_VERSION = "0.2.3"
+APP_VERSION = "0.2.4"
 
 
 @dataclass
