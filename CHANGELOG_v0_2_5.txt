@@ -1,4 +1,4 @@
-Synthwave MIDI Reimaginer GUI v0.2.6
+Synthwave MIDI Reimaginer GUI v0.2.7
 ====================================
 
 - Added 26 additional style presets including Amapiano, Cumbia, Ragga, Electro Swing, UK Bass, UKG, Two Step, Acid Jazz, Rare Groove, Balearic, Waltz, Cha-Cha-Cha, Salsa, Samba, Rumba, Polka, Bluegrass, New Age, Gregorian Chant, Minimal Wave, EBM, Shoegaze, Industrial Metal, Afro House, Makina and Phonk.

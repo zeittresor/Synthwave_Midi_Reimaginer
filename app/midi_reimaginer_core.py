@@ -997,7 +997,8 @@ def build_reimagined_midi(
     seed = normalize_seed(seed)
     intensity = clamp01(intensity)
     repetition = clamp01(repetition)
-    rhythmic_variation = 1.0 - repetition
+    accomp_relaxation = repetition
+    pulse_amount = 1.0 - accomp_relaxation
 
     # v0.2.2+: make the slider musically meaningful.
     # 0.0 = close to source / cleaned copy, 1.0 = mostly regenerated arrangement in the selected style.
@@ -1013,6 +1014,7 @@ def build_reimagined_midi(
     rng_lead = seeded_rng(seed, "lead")
     rng_drum = seeded_rng(seed, "drums")
     rng_echo = seeded_rng(seed, "echo")
+    rng_relief = seeded_rng(seed, "relief")
     variant = master_rng.randrange(128)
     variant4 = variant % 4
 
@@ -1023,7 +1025,7 @@ def build_reimagined_midi(
     log(progress, f"Analysiere MIDI: {src.name}")
     log(progress, f"Generation seed: {seed} / arrangement variant {variant}")
     log(progress, f"Transformation intensity: {intensity:.2f} (source keep {source_keep:.2f}, rewrite {rewrite:.2f})")
-    log(progress, f"Note repetition: {repetition:.2f} (rhythmic variation {rhythmic_variation:.2f})")
+    log(progress, f"Accompaniment relaxation: {accomp_relaxation:.2f} (0=dense pulses, 1=sparser/pad relief)")
     log(progress, f"Style preset: {style_name} ({style_slug})")
     log(progress, f"Style lead/melody instruments: {'ON' if use_style_instruments else 'OFF'}")
     analysis = analyze_midi(src, progress=progress)
@@ -1095,23 +1097,33 @@ def build_reimagined_midi(
     hat_swing = int(div * swing_amount) if swing_amount > 0 else 0
     fill_variant = rng_drum.randrange(8)
     copy_grid = div // 8 if intensity < 0.25 else div // 4
-    source_note_probability = max(0.04, (1.0 - 0.88 * rewrite) * mix_float(0.55, 1.0, repetition))
-    # Low repetition values should noticeably suppress long same-note loops,
-    # especially in source-derived arp/lead/tick material.
-    repetition_keep = mix_float(0.42, 1.0, repetition)
+    # The repetition slider was repurposed in v0.2.7: it now controls accompaniment relaxation.
+    # 0.0 = active/rhythmic accompaniment, 1.0 = fewer rapid note attacks plus more pad/string relief.
+    source_note_probability = max(0.04, (1.0 - 0.88 * rewrite) * mix_float(1.0, 0.68, accomp_relaxation))
+    accomp_gate = mix_float(1.0, 0.28, accomp_relaxation)
+    pulse_gate = mix_float(1.0, 0.18, accomp_relaxation)
     repeat_state: dict[str, tuple[int, int]] = {}
 
     def add_mel(evs: list[Event], ch: int, pitch: int, start: int, duration: int, vel: int, role: str, lo: int, hi: int, rng: random.Random) -> bool:
+        # Pitch de-repetition is strongest for accompaniment roles when the
+        # relaxation slider is moved right. Bass and main hooks remain more
+        # stable so the musical identity does not disappear.
+        if role in {"pluck", "ticks", "vibe", "vibe_relief", "hook_answer", "lead_fill", "echo"}:
+            role_repetition = max(0.02, 1.0 - accomp_relaxation)
+        elif role in {"lead", "hook"}:
+            role_repetition = max(0.18, 1.0 - 0.55 * accomp_relaxation)
+        else:
+            role_repetition = max(0.25, 1.0 - 0.35 * accomp_relaxation)
         return add_note_controlled(
             evs, ch, pitch, start, duration, vel,
             state=repeat_state, role=role, lo=lo, hi=hi, roots=roots, scale=scale,
-            rng=rng, repetition=repetition, rewrite=rewrite,
+            rng=rng, repetition=role_repetition, rewrite=rewrite,
         )
 
     new_tracks: list[list[Event]] = []
     meta = [
         make_meta(0, 0x03, f"Synthwave MIDI Reimaginer GUI - {style_name}".encode("latin1", errors="replace"), order=0),
-        make_meta(0, 0x01, f"Seed: {seed}; Style: {style_slug}; Variant: {variant}; Intensity: {intensity:.2f}; Rewrite: {rewrite:.2f}; BPM: {target_bpm_value:.1f}; Repetition: {repetition:.2f}; Harmony lock: {'ON' if harmony_lock else 'OFF'}".encode("latin1", errors="replace"), order=1),
+        make_meta(0, 0x01, f"Seed: {seed}; Style: {style_slug}; Variant: {variant}; Intensity: {intensity:.2f}; Rewrite: {rewrite:.2f}; BPM: {target_bpm_value:.1f}; Accompaniment relaxation: {accomp_relaxation:.2f}; Harmony lock: {'ON' if harmony_lock else 'OFF'}".encode("latin1", errors="replace"), order=1),
         make_meta(0, 0x51, tempo.to_bytes(3, "big"), order=2),
         make_meta(0, 0x58, bytes(analysis.time_signature), order=3),
     ]
@@ -1172,7 +1184,7 @@ def build_reimagined_midi(
     for i, n in enumerate(arp_src):
         if n.start >= song_end:
             continue
-        if rng_arp.random() > (0.95 if intensity < 0.08 else max(0.05, 1.0 - 0.72 * rewrite)):
+        if rng_arp.random() > (0.95 if intensity < 0.08 else max(0.04, (1.0 - 0.72 * rewrite) * accomp_gate)):
             continue
         if skip_mod > 2 and (i + pluck_phase) % skip_mod == skip_mod - 1 and n.start > 16*bar:
             continue
@@ -1183,16 +1195,24 @@ def build_reimagined_midi(
             p = maybe_mutate_pitch(p, st, arp_lo, arp_hi, roots, scale, rng_arp, rewrite * 0.85, chord_bias=max(0.42, harmony_strictness * 0.72))
         add_mel(pluck, 2, p, st, min(dur, song_end-st), n.vel * mix_float(0.54, 0.34, rewrite), "pluck", arp_lo, arp_hi, rng_arp)
     if rewrite > 0.18:
-        steps = 8 if arp_density < 0.70 else 16
-        step = div // (4 if steps == 16 else 2)
+        if accomp_relaxation > 0.78:
+            steps = 4
+        elif accomp_relaxation > 0.48:
+            steps = 8
+        else:
+            steps = 8 if arp_density < 0.70 else 16
+        step = div // (4 if steps == 16 else (2 if steps == 8 else 1))
         degree_templates = [[0,2,4,2], [0,4,2,6], [0,2,5,4], [2,4,6,4], [0,1,2,4]]
         for bs in range(4 * bar, song_end, bar):
-            if rng_arp.random() > mix_float(0.10, 0.88, rewrite):
+            # Higher relaxation creates real breathing gaps instead of endless arpeggio chatter.
+            if accomp_relaxation > 0.55 and ((bs // bar + variant4) % (3 if accomp_relaxation < 0.82 else 2) == 0):
+                continue
+            if rng_arp.random() > mix_float(0.10, 0.88, rewrite) * accomp_gate:
                 continue
             root = active_root_for_tick(bs, roots)
             tmpl = rng_arp.choice(degree_templates)
             for s in range(steps):
-                if rng_arp.random() < (0.18 * (1.0 - arp_density)):
+                if rng_arp.random() < (0.18 * (1.0 - arp_density) + 0.46 * accomp_relaxation):
                     continue
                 off = s * step + (hat_swing if (s % 2 and steps == 8) else 0)
                 deg = tmpl[(s + variant + bs // bar) % len(tmpl)]
@@ -1208,7 +1228,7 @@ def build_reimagined_midi(
     for i, n in enumerate(vibe_src):
         if n.start >= song_end or i % 5 == 4:
             continue
-        if rng_lead.random() > max(0.04, 0.72 - 0.50 * rewrite):
+        if rng_lead.random() > max(0.03, (0.72 - 0.50 * rewrite) * accomp_gate):
             continue
         st = quantize_tick(n.start + (div//2 if i % 8 == 3 and rewrite > 0.25 else 0), div // 4)
         if st >= song_end:
@@ -1219,7 +1239,9 @@ def build_reimagined_midi(
         add_mel(vibe, 3, p, st, min(max(36, int(n.duration * mix_float(0.42, 0.28, rewrite))), song_end-st), n.vel * mix_float(0.34, 0.24, rewrite), "vibe", max(52, lead_lo), lead_hi, rng_lead)
     if rewrite > 0.42:
         for bs in range(8 * bar, song_end, 2 * bar):
-            if rng_lead.random() > rewrite:
+            if accomp_relaxation > 0.58 and ((bs // bar + variant) % 4 == 0):
+                continue
+            if rng_lead.random() > rewrite * accomp_gate:
                 continue
             root = active_root_for_tick(bs, roots)
             for k, deg in enumerate(rng_lead.choice([[4,2,0], [2,4,5], [6,4,2], [5,4,2]])):
@@ -1230,11 +1252,13 @@ def build_reimagined_midi(
     # Soft tonal ticks from dense sources; at high intensity seed changes the pattern heavily.
     ticks = setup_track(f"{style_name.upper()} TONAL TICKS", ch=4, program=resolved_program(style_preset, "ticks", 115, use_style_instruments=use_style_instruments), volume=int(28 + brightness * 26 + rewrite * 14), pan=96, reverb=int(8 + reverb_amount * 42), chorus=int(4 + brightness * 18))
     tick_src = notes_for_role(analysis, "hook_problem") or notes_for_role(analysis, "arp") or all_notes
-    max_ticks = int(mix_float(80, 1400, max(arp_density, rewrite)) * mix_float(0.45, 1.0, repetition))
+    max_ticks = int(mix_float(80, 1400, max(arp_density, rewrite)) * mix_float(1.0, 0.12, accomp_relaxation))
     for i, n in enumerate(tick_src[:max_ticks]):
         if n.start >= song_end or i % 3 == 2:
             continue
-        if rng_arp.random() > mix_float(0.32, 0.86, rewrite):
+        if accomp_relaxation > 0.50 and ((n.start // bar + variant4) % (3 if accomp_relaxation < 0.82 else 2) == 0):
+            continue
+        if rng_arp.random() > mix_float(0.32, 0.86, rewrite) * pulse_gate:
             continue
         st = quantize_tick(n.start + rng_arp.choice([0, 0, div//8, -div//8]) * (1 if rewrite > 0.55 else 0), div // 8)
         if harmony_lock:
@@ -1247,11 +1271,11 @@ def build_reimagined_midi(
     ticks.append(make_meta(song_end, 0x2F, b"", order=99)); new_tracks.append(ticks)
 
     # Pads: more original harmonic source at low intensity, seed-derived voicing/progression at high intensity.
-    pad = setup_track(f"{style_name.upper()} PAD", ch=5, program=resolved_program(style_preset, "pad", 89, use_style_instruments=True), volume=int(42 + pad_density * 30 + rewrite * 6), pan=62, reverb=int(36 + reverb_amount * 64), chorus=int(28 + brightness * 48))
+    pad = setup_track(f"{style_name.upper()} PAD", ch=5, program=resolved_program(style_preset, "pad", 89, use_style_instruments=True), volume=int(42 + pad_density * 30 + rewrite * 6 + accomp_relaxation * 16), pan=62, reverb=int(36 + reverb_amount * 64), chorus=int(28 + brightness * 48))
     for idx, (st, root) in enumerate(roots):
         if st < 2 * bar or st >= song_end:
             continue
-        if pad_density < 0.45 and idx % 3 == 1:
+        if pad_density < 0.45 and idx % 3 == 1 and accomp_relaxation < 0.65:
             continue
         if rng_pad.random() > mix_float(0.78, 0.98, rewrite):
             continue
@@ -1259,13 +1283,42 @@ def build_reimagined_midi(
         pcs = chord_tones_for_root(root, scale, seventh=seventh)
         if rewrite > 0.70 and rng_pad.random() < 0.4:
             pcs = pcs[1:] + pcs[:1]  # inversion
-        dur = min(int(mix_float(bar * 2 - div // 4, bar * rng_pad.choice([1,2,2,4]), rewrite)), song_end - st)
+        dur = min(int(mix_float(bar * 2 - div // 4, bar * rng_pad.choice([1,2,2,4]), rewrite) * mix_float(1.0, 1.65, accomp_relaxation)), song_end - st)
         for j, pc in enumerate(pcs):
             p = nearest_pitch(pc, pad_center + j * rng_pad.choice([4,5,7]) + (variant4 - 1) * 2)
             if j == 0 and p > 55:
                 p -= 12
             add_note(pad, 5, p, st + j * 4, max(div//2, dur - j*4), 36 + j*6 + int(12 * rewrite))
     pad.append(make_meta(song_end, 0x2F, b"", order=99)); new_tracks.append(pad)
+
+    # v0.2.7: accompaniment relaxation replacement layer.
+    # When the slider is moved right, fast accompaniment pulses are thinned out
+    # and these long style-safe string/pad swells create deliberate rest phases.
+    if accomp_relaxation > 0.18:
+        relief = setup_track(
+            f"{style_name.upper()} RELIEF STRINGS", ch=0,
+            program=resolved_program(style_preset, "strings", 48, use_style_instruments=True),
+            volume=int(22 + accomp_relaxation * 46 + pad_density * 10),
+            pan=70, reverb=int(52 + reverb_amount * 70), chorus=int(26 + brightness * 38),
+        )
+        relief_every = 4 * bar if accomp_relaxation < 0.66 else 2 * bar
+        relief_start = 8 * bar
+        for ridx, bs in enumerate(range(relief_start, song_end, relief_every)):
+            if bs >= song_end:
+                break
+            # Leave some holes so it breathes rather than becoming a wall of strings.
+            if accomp_relaxation < 0.72 and (ridx + variant4) % 3 == 1:
+                continue
+            root = active_root_for_tick(bs, roots)
+            pcs = chord_tones_for_root(root, scale, seventh=(rng_relief.random() < 0.30 + 0.30 * rewrite))
+            dur = min(int(relief_every * mix_float(0.72, 1.65, accomp_relaxation)), song_end - bs)
+            for j, pc in enumerate(pcs[:4]):
+                center = pad_center + j * 5 + rng_relief.choice([-7, 0, 0, 7])
+                p = nearest_pitch(pc, center)
+                if j == 0 and p > 56:
+                    p -= 12
+                add_note(relief, 0, pitch_into_range(p, 40, 76), bs + j * 8, max(div, dur - j * 8), 26 + int(28 * accomp_relaxation) + j * 4)
+        relief.append(make_meta(song_end, 0x2F, b"", order=99)); new_tracks.append(relief)
 
     # Icon hook: source-derived at low/mid intensity, seed-composed motif at high intensity.
     hook_src = notes_for_role(analysis, "hook_problem") or notes_for_role(analysis, "lead") or all_notes
@@ -1327,7 +1380,7 @@ def build_reimagined_midi(
     ]
     for sec_start in range(start_section, song_end, section_step):
         base_reps = 1 if intensity < 0.42 else (2 if intensity < 0.82 else rng_hook.choice([2, 2, 3]))
-        reps = max(1, int(round(base_reps * mix_float(0.55, 1.0, repetition))))
+        reps = max(1, int(round(base_reps * mix_float(1.0, 0.45, accomp_relaxation))))
         for rep in range(reps):
             phrase = sec_start + rep * 2 * bar
             if phrase >= song_end:
@@ -1381,17 +1434,19 @@ def build_reimagined_midi(
 
     # Support echo.
     echo_src = all_notes[::max(1, len(all_notes)//1000)] if len(all_notes) > 1000 else all_notes
-    echo = setup_track(f"{style_name.upper()} SUPPORT ECHO", ch=8, program=resolved_program(style_preset, "echo", 88, use_style_instruments=use_style_instruments), volume=int(20 + brightness * 18 + delay_amount * 24 + rewrite * 10), pan=72, reverb=int(22 + reverb_amount * 56), chorus=int(18 + brightness * 42))
+    echo = setup_track(f"{style_name.upper()} SUPPORT ECHO", ch=8, program=resolved_program(style_preset, "echo", 88, use_style_instruments=use_style_instruments), volume=int((20 + brightness * 18 + delay_amount * 24 + rewrite * 10) * mix_float(1.0, 0.65, accomp_relaxation)), pan=72, reverb=int(22 + reverb_amount * 56), chorus=int(18 + brightness * 42))
     for i, n in enumerate(echo_src):
         if n.start >= song_end or i % 7 == 6:
             continue
-        if rng_echo.random() > mix_float(0.18, 0.72, rewrite):
+        if accomp_relaxation > 0.52 and ((n.start // bar + variant4) % (3 if accomp_relaxation < 0.82 else 2) == 0):
+            continue
+        if rng_echo.random() > mix_float(0.18, 0.72, rewrite) * mix_float(1.0, 0.30, accomp_relaxation):
             continue
         st = quantize_tick(n.start + (div//2 if (i + variant) % 8 == 3 else 0), div // 4)
         p = pitch_into_range(n.pitch, max(44, lead_lo-8), lead_hi)
         if harmony_lock:
             p = maybe_mutate_pitch(p, st, max(44, lead_lo-8), lead_hi, roots, scale, rng_echo, rewrite * 0.85, chord_bias=max(0.46, harmony_strictness * 0.68))
-        dur = max(div//6, int(n.duration * mix_float(0.72, 0.48, rewrite)))
+        dur = max(div//6, int(n.duration * mix_float(0.72, 0.48, rewrite) * mix_float(1.0, 1.45, accomp_relaxation)))
         add_mel(echo, 8, p, st, min(dur, song_end-st), n.vel * mix_float(0.22, 0.32, rewrite), "echo", max(44, lead_lo-8), lead_hi, rng_echo)
     echo.append(make_meta(song_end, 0x2F, b"", order=99)); new_tracks.append(echo)
 
@@ -1959,7 +2014,7 @@ def process_file(
         f"  Intensity: {intensity:.2f}\n"
         f"  Rewrite amount: {smoothstep01(intensity):.2f}\n"
         f"  Target BPM: {target_bpm if target_bpm is not None else 'auto'}\n"
-        f"  Note repetition: {repetition:.2f} (0.00 = reduce same-note loops, 1.00 = keep/allow repeated patterns)\n"
+        f"  Accompaniment relaxation: {repetition:.2f} (0.00 = dense/active accompaniment, 1.00 = more breathing room, fewer rapid attacks, more pads)\n"
         f"  Style lead/melody instruments: {'ON' if use_style_instruments else 'OFF'}\n"
         f"  Slider behavior: intensity 0.00 = source-like cleanup, intensity 1.00 = mostly regenerated arrangement in resolved style\n"
         f"  Sample rate: {sample_rate}\n\n"
@@ -1983,6 +2038,7 @@ def process_file(
         "style_name": resolved_style_name,
         "random_style": bool(random_style),
         "target_bpm": target_bpm,
+        "accompaniment_relaxation": repetition,
         "repetition": repetition,
         "use_style_instruments": bool(use_style_instruments),
         "source_hash": source_hash,
@@ -2000,7 +2056,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--sample-rate", type=int, default=44100, help="WAV sample rate")
     ap.add_argument("--intensity", type=float, default=0.65, help="Transformation intensity 0.0-1.0")
     ap.add_argument("--bpm", type=float, default=None, help="Optional exact target BPM. Omit for source/style-derived auto BPM.")
-    ap.add_argument("--repetition", type=float, default=0.50, help="Repeated-note amount 0.0-1.0. Lower values reduce long same-note loops.")
+    ap.add_argument("--repetition", type=float, default=0.50, help="Accompaniment relaxation 0.0-1.0. 0=dense/active pulses, 1=fewer rapid attacks and more pad/string relief.")
     ap.add_argument("--use-style-instruments", action="store_true", help="Use style preset GM programs for lead/melody tracks too.")
     ap.add_argument("--no-harmony-lock", action="store_true", help="Disable scale/chord correction. Default keeps copied notes harmonically locked.")
     ap.add_argument("--seed", type=int, default=None, help="Reproducible generation seed. Omit for a new random seed each run.")

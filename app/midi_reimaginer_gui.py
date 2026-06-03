@@ -29,7 +29,7 @@ if str(APP_DIR) not in sys.path:
 
 import midi_reimaginer_core as core
 
-APP_VERSION = "0.2.6"
+APP_VERSION = "0.2.7"
 THEME_DIR = APP_DIR / "themes"
 LANG_DIR = APP_DIR / "lang"
 
@@ -437,7 +437,7 @@ class MainWindow(QMainWindow):
         self.sample_rate_label.setText(self._tr("sample_rate", "Sample rate:"))
         self.intensity_name_label.setText(self._tr("transformation_intensity", "Transformation intensity:"))
         self.bpm_name_label.setText(self._tr("bpm", "BPM:"))
-        self.repetition_name_label.setText(self._tr("repeated_note_amount", "Repeated note amount:"))
+        self.repetition_name_label.setText(self._tr("repeated_note_amount", "Accompaniment relaxation:"))
         self.harmony_lock_cb.setText(self._tr("harmony_lock", "Harmony lock / fix clashing notes"))
         self.auto_seed_cb.setText(self._tr("auto_seed", "New random seed each render"))
         self.use_style_instruments_cb.setText(self._tr("use_style_instruments", "Use style lead/melody instruments"))
@@ -493,7 +493,7 @@ This tool analyzes a MIDI file and creates a cleaned-up derivative version using
 
 - **Transformation Intensity** changes how strongly the song is rearranged.
 - **BPM** controls tempo independently from transformation intensity.
-- **Repeated note amount** controls how strongly long same-note repetitions are allowed.
+- **Accompaniment relaxation** controls whether fast accompaniment keeps pulsing or gets thinned into breathing room with pads/strings.
 - **Seed** controls reproducible variation. Auto Seed is ON by default.
 - **Random Style from seed** chooses a style deterministically from the seed.
 - **Play Source MIDI**, **Play MIDI Output**, and **Play WAV/MP3 Output** make comparison easier.
@@ -573,7 +573,7 @@ This tool analyzes a MIDI file and creates a cleaned-up derivative version using
         if not hasattr(self, "repetition_slider"):
             return
         self.repetition_slider.setToolTip(
-            self._tr("tt_repetition_dynamic", "Controls how much repeated same-note material is allowed. Current: {value}%. 0% reduces long loops, 100% preserves repetitive patterns.").format(
+            self._tr("tt_repetition_dynamic", "Controls how much fast repeated accompaniment is thinned out. Current: {value}%. 0% = active/pulsing accompaniment, 100% = more breathing room with pads/strings replacing repeated attacks.").format(
                 value=self.repetition_slider.value()
             )
         )
@@ -713,7 +713,7 @@ This tool analyzes a MIDI file and creates a cleaned-up derivative version using
             return
         self._set_busy(True)
         self._log(
-            self._tr("log_rendering", "Rendering new version from {name} with seed {seed}, style {style}{random}, BPM {bpm:.0f}, repetition {repetition:.2f} ...").format(
+            self._tr("log_rendering", "Rendering new version from {name} with seed {seed}, style {style}{random}, BPM {bpm:.0f}, accompaniment relaxation {repetition:.2f} ...").format(
                 name=settings.source.name,
                 seed=settings.seed,
                 style=settings.style_id,

@@ -1,10 +1,18 @@
-# Synthwave MIDI Reimaginer GUI v0.2.6
+# Synthwave MIDI Reimaginer GUI v0.2.7
 
 Offline-friendly PyQt6 GUI for analyzing MIDI files and creating a derivative reimagined version with selectable modular style presets.
 
 Source hint for standalone copies:
 `https://github.com/zeittresor/Synthwave_Midi_Reimaginer`
 
+
+## New in v0.2.7
+
+- Reworked the former **Repeated note amount** control into **Accompaniment relaxation**.
+- Moving the slider right now reduces fast repeated accompaniment attacks and creates more breathing room.
+- High relaxation values add long harmony-safe pad/string relief layers instead of endless pluck/tick repetitions.
+- Dense source-derived arp, glass support and tonal tick tracks are now thinned by the relaxation value.
+- The analysis TXT now writes `Accompaniment relaxation` so generated files are easier to diagnose.
 
 ## New in v0.2.6
 
@@ -33,7 +41,7 @@ Source hint for standalone copies:
 
 - **Transformation intensity** controls how strongly the source song is transformed.
 - **BPM** controls actual tempo independently from transformation intensity.
-- **Repeated note amount** controls how much long same-note repetition is allowed.
+- **Accompaniment relaxation** controls how much fast repeated accompaniment is thinned out and replaced with pads/strings/rest space.
 - **Seed** controls reproducible variation. Auto Seed is enabled by default.
 - **Random Style from seed** chooses a style deterministically from the seed.
 - **Use style lead/melody instruments** optionally changes lead/hook/pluck colors to the selected style's GM instrument choices.
@@ -55,5 +63,5 @@ After `install_windows.bat` has installed the virtual environment once, `run_win
 ## Example CLI
 
 ```bat
-.venv\Scripts\python.exe app\midi_reimaginer_core.py examples\test.mid --style amapiano --seed 12345 --bpm 112 --repetition 0.40
+.venv\Scripts\python.exe app\midi_reimaginer_core.py examples\test.mid --style amapiano --seed 12345 --bpm 112 --repetition 0.70
 ```

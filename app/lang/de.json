@@ -1,5 +1,5 @@
 {
-  "window_title": "Synthwave MIDI Reimaginer GUI v0.2.6",
+  "window_title": "Synthwave MIDI Reimaginer GUI v0.2.7",
   "title": "Synthwave MIDI Reimaginer - Multi Style",
   "group_source": "1. Quelle / Ausgabe",
   "source_midi": "Quell-MIDI:",
@@ -16,7 +16,7 @@
   "sample_rate": "Sample-Rate:",
   "transformation_intensity": "Transformation intensity:",
   "bpm": "BPM:",
-  "repeated_note_amount": "Repeated note amount:",
+  "repeated_note_amount": "Begleit-Entspannung:",
   "harmony_lock": "Harmony Lock / schiefe Noten korrigieren",
   "auto_seed": "Bei jedem Render neuen Zufalls-Seed",
   "use_style_instruments": "Lead-/Melodieinstrumente passend zum Stil nutzen",
@@ -51,7 +51,7 @@
   "log_analyzing": "Analysiere {path} ...",
   "status_analysis_finished": "Status: Analyse fertig",
   "analysis_finished": "Analyse fertig.",
-  "log_rendering": "Rendere neue Version aus {name} mit Seed {seed}, Stil {style}{random}, BPM {bpm:.0f}, Wiederholung {repetition:.2f} ...",
+  "log_rendering": "Rendere neue Version aus {name} mit Seed {seed}, Stil {style}{random}, BPM {bpm:.0f}, Begleit-Entspannung {repetition:.2f} ...",
   "status_render_finished": "Status: Render fertig",
   "done": "Fertig.",
   "render_finished_title": "Render fertig",
@@ -88,7 +88,7 @@
   "tt_play_audio": "Öffnet die zuletzt erzeugte WAV oder MP3 im Standard-Audioplayer.",
   "tt_progress": "Zeigt den aktuellen Analyse-/Render-Schritt. Wenn es hängt, im Log-Tab nachsehen.",
   "tt_bpm_dynamic": "Zieltempo für MIDI/WAV. Aktuell: {value} BPM. Stilbereich: {lo}-{hi} BPM.",
-  "tt_repetition_dynamic": "Steuert, wie viel gleichbleibende Notenwiederholung erlaubt ist. Aktuell: {value}%. 0% reduziert lange Loops, 100% erhält repetitive Patterns.",
+  "tt_repetition_dynamic": "Steuert, wie stark schnelle wiederholte Begleitanschläge ausgedünnt werden. Aktuell: {value}%. 0% = aktive/pulsierende Begleitung, 100% = mehr Ruhephasen mit Pads/Strings statt ständigen Anschlägen.",
   "tt_intensity_dynamic": "Transformationsstärke für {style}. Aktuell: {value}%. 0% = nah an der Quelle, 50% = erkennbar aber stärker arrangiert, 100% = weitgehend im Stil neu generiert. {hint}",
-  "help_markdown": "# Synthwave MIDI Reimaginer GUI v0.2.6\n\nDieses Tool analysiert eine MIDI-Datei und erzeugt daraus eine bereinigte, abgeleitete neue Version mit auswählbarem Stil-Preset.\n\n## Wichtige Regler\n\n- **Transformation Intensity** steuert, wie stark der Song musikalisch umgebaut wird.\n- **BPM** steuert das Tempo unabhängig von der Transformation.\n- **Repeated note amount** steuert, wie stark monotone Wiederholungen erhalten bleiben.\n- **Seed** steuert reproduzierbare Variation. Auto Seed ist standardmäßig aktiv.\n- **Zufallsstil aus Seed** wählt den Stil reproduzierbar aus dem Seed.\n- **Quell-MIDI abspielen**, **MIDI-Output abspielen** und **WAV/MP3-Output abspielen** erleichtern den Vergleich.\n\n## Modulare Dateien\n\n- Styles: `app/styles/style_presets.json`\n- CSV-Übersicht: `app/styles/electronic_styles.csv`\n- UI-Themes: `app/themes/*.qss`\n- UI-Sprachen: `app/lang/*.json`\n"
+  "help_markdown": "# Synthwave MIDI Reimaginer GUI v0.2.7\n\nDieses Tool analysiert eine MIDI-Datei und erzeugt daraus eine bereinigte, abgeleitete neue Version mit auswählbarem Stil-Preset.\n\n## Wichtige Regler\n\n- **Transformation Intensity** steuert, wie stark der Song musikalisch umgebaut wird.\n- **BPM** steuert das Tempo unabhängig von der Transformation.\n- **Begleit-Entspannung** steuert, ob schnelle Begleitmuster weiter pulsieren oder zugunsten von Ruhephasen, Pads und Strings ausgedünnt werden.\n- **Seed** steuert reproduzierbare Variation. Auto Seed ist standardmäßig aktiv.\n- **Zufallsstil aus Seed** wählt den Stil reproduzierbar aus dem Seed.\n- **Quell-MIDI abspielen**, **MIDI-Output abspielen** und **WAV/MP3-Output abspielen** erleichtern den Vergleich.\n\n## Modulare Dateien\n\n- Styles: `app/styles/style_presets.json`\n- CSV-Übersicht: `app/styles/electronic_styles.csv`\n- UI-Themes: `app/themes/*.qss`\n- UI-Sprachen: `app/lang/*.json`\n"
 }

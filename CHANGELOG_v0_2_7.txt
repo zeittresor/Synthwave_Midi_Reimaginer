@@ -1,0 +1,7 @@
+Synthwave MIDI Reimaginer GUI v0.2.7
+
+- Reworked the repetition slider into Accompaniment relaxation.
+- Right side now means fewer rapid accompaniment attacks and more breathing room.
+- Added a relief strings/pad layer that appears at higher relaxation values.
+- Thinned dense source-derived arp, glass support and tonal tick material according to relaxation.
+- Updated English/German UI labels, tooltips, help text and analysis TXT wording.
