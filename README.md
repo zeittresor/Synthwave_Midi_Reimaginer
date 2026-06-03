@@ -2,8 +2,26 @@
 
 Offline-friendly PyQt6 GUI for analyzing MIDI files and creating derivative reimagined versions with selectable modular style presets.
 
-Source hint for standalone copies:
-`https://github.com/zeittresor/Synthwave_Midi_Reimaginer`
+Supported music styles (currently 171):
+
+20s Jazz, 70s Rock, 8-Bar Grime, 8-Bit Sound, Acid House, Acid Jazz, Acid Techno, Acid Trance, Afro House,
+Aggrotech, Amapiano, Ambient, Balearic, Baroque, Bebop, Berlin School, Big Beat, Big Room, Bluegrass, Blues, Bossa
+Nova, Breakbeat, Breakcore, Brostep, Celtic, Cha-Cha-Cha, Chicago House, Chillout, Chillwave, Chiptune, Choral,
+Church Music, Cinematic Trailer, Classical, Country Folk, Cumbia, Cyberpunk, Dancehall, Dark Ambient, Darksynth,
+Darkwave, Death Industrial, Deep House, Disco, Disco House, Downtempo, Dream Pop, Drill, Drum and Bass, Dub,
+Dubstep, EBM, Electro, Electro House, Electro Swing, Epic Fantasy, Eski, Eurodance, Flamenco, Flower Power,
+Footwork, French House, Frenchcore, Funk, Future Bass, Future Garage, Future Grime, Future House, Future Rave,
+Gabba, Gangster Rap, Garage House, Glitch, Goa Trance, Gospel, Grad at Work, Gregorian Chant, Grindie, Gypsy Swing,
+Happy Hardcore, Hard House, Hardstyle, Hip Hop, Hip House, Holy Ambient, House, Ibiza House, IDM, Indianic, Indie
+Rock, Industrial, Industrial Metal, Italo Disco, Japanoise, Jersey Club, Jump Up, Jungle, K-Pop, Klezmer, Latin
+Electro, Latin House, Liquid Drum and Bass, Lo-Fi Hip Hop, Makina, Medieval, Meditation, Melodic House, Merengue,
+Metal, Minimal House, Minimal Tekkno, Minimal Wave, Modern Pop, Moombahton, Native Tribe, Neo Grime, New Age, No
+Drums / Percussion, Nu Disco, Occult Ritual, Orchestral Score, Outrun, Phonk, Polka, Pop, Psytrance, Punk Rock,
+R&B, Ragga, Rare Groove, Rave, Reggae, Reggaeton, Retrowave, Rhythm & Grime, Rock'n Roll, Rockabilly, Rumba, Salsa,
+Samba, Schranz, Shoegaze, SID Tune, Simple Piano, Ska, Soul, Speed Garage, Spherical Harmonics, Surf Rock,
+Symphonic Metal, Synthpop, Synthwave, Tango, Tech House, Techno, Techstep, Traditional Panflute, Trance, Trap, Trap
+EDM, Trip Hop, Tropical House, Two Step, UK Bass, UK Garage, UKG, Uplifting Trance, Vaporwave, Vocal House, Waltz,
+Western
 
 ## New in v0.2.9
 
