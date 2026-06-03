@@ -1,0 +1,13 @@
+Synthwave MIDI Reimaginer GUI v0.2.6
+====================================
+
+- Added 26 additional style presets including Amapiano, Cumbia, Ragga, Electro Swing, UK Bass, UKG, Two Step, Acid Jazz, Rare Groove, Balearic, Waltz, Cha-Cha-Cha, Salsa, Samba, Rumba, Polka, Bluegrass, New Age, Gregorian Chant, Minimal Wave, EBM, Shoegaze, Industrial Metal, Afro House, Makina and Phonk.
+- Kept style presets alphabetically sorted.
+- Added Play Source MIDI button.
+- Split playback into Play MIDI Output and Play WAV/MP3 Output.
+- Added sample-rate choices: 22050, 32000, 44100, 48000, 96000 and 128000 Hz.
+- Wrapped the full GUI in a vertical scroll area to avoid clipped controls on smaller displays.
+- Moved theme selection into a dedicated UI Options section.
+- Moved QSS themes into app/themes and added Dark, Light, Matrix, Hell, Retro Amber and Ocean.
+- Added language selection with external JSON files in app/lang; English and German included.
+- Updated style preset version to 3.

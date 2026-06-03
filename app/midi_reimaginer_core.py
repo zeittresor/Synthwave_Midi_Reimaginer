@@ -122,7 +122,7 @@ def normalize_seed(seed: int | str | None) -> int:
 # -----------------------------
 # Modular style presets
 # -----------------------------
-STYLE_PRESET_VERSION = 2
+STYLE_PRESET_VERSION = 4
 
 
 def _styles_dir() -> Path:

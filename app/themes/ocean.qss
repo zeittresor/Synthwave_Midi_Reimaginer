@@ -1,0 +1,15 @@
+/* source: https://github.com/zeittresor/Synthwave_Midi_Reimaginer */
+QWidget { background: #06131d; color: #d9f6ff; font-size: 10.5pt; }
+QLabel#Title { font-size: 22pt; font-weight: 700; color: #f0fcff; padding: 4px 0 10px 0; }
+QGroupBox { border: 1px solid #1a5367; border-radius: 12px; margin-top: 10px; padding: 12px; background: #091c2a; }
+QGroupBox::title { subcontrol-origin: margin; left: 12px; padding: 0 6px; color: #75ddff; }
+QLineEdit, QTextEdit, QComboBox, QSpinBox { background: #031018; border: 1px solid #1a5367; border-radius: 8px; padding: 7px; selection-background-color: #226c85; }
+QPushButton { background: #123247; border: 1px solid #2d7894; border-radius: 10px; padding: 9px 14px; font-weight: 600; color: #e4faff; }
+QPushButton:hover { background: #17435f; }
+QTabWidget::pane { border: 1px solid #1a5367; border-radius: 10px; }
+QTabBar::tab { background: #091c2a; padding: 9px 16px; border: 1px solid #1a5367; }
+QTabBar::tab:selected { background: #123247; color: #ffffff; }
+QProgressBar { border: 1px solid #1a5367; border-radius: 8px; text-align: center; background: #031018; }
+QProgressBar::chunk { background: #4bc7e8; border-radius: 7px; }
+QSlider::groove:horizontal { height: 6px; background: #1a5367; border-radius: 3px; }
+QSlider::handle:horizontal { background: #75ddff; width: 18px; margin: -6px 0; border-radius: 9px; }

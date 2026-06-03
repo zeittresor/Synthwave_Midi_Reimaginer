@@ -1,81 +1,59 @@
-# Synthwave MIDI Reimaginer GUI v0.2.4
+# Synthwave MIDI Reimaginer GUI v0.2.6
 
-Offline-friendly PyQt6 tool for analyzing a source MIDI file and generating a new reimagined MIDI/WAV/optional MP3 version with selectable modular style presets.
+Offline-friendly PyQt6 GUI for analyzing MIDI files and creating a derivative reimagined version with selectable modular style presets.
 
-<img width="1183" height="1005" alt="2026-06-03 09_54_28-Synthwave MIDI Reimaginer GUI" src="https://github.com/user-attachments/assets/08ae0935-9662-48ac-b8b5-7a2ffdf87e4a" />
+Source hint for standalone copies:
+`https://github.com/zeittresor/Synthwave_Midi_Reimaginer`
 
-## New in v0.2.4
 
-- Added more style presets, including:
-  - Bebop
-  - Blues
-  - Baroque
-  - Church Music
-  - Disco
-  - Epic Fantasy
-  - Flamenco
-  - Funk
-  - Gospel
-  - Gypsy Swing
-  - Hip Hop
-  - Holy Ambient
-  - Klezmer
-  - Lo-Fi Hip Hop
-  - Medieval
-  - Moombahton
-  - Modern Pop
-  - No Drums / Percussion
-  - R&B
-  - Reggaeton
-  - Simple Piano
-  - Soul
-  - Surf Rock
-  - Tango
-  - Western
-- Style presets are now alphabetically sorted in the JSON file and in the GUI drop-down.
-- Added drum engine support for:
-  - `no_drums` / `no_percussion` / `silent`
-  - `moombahton` / `reggaeton`
-  - `hip_hop`
-  - `funk`
-- Replaced the bundled example MIDI with a generated safe demo melody instead of the earlier uploaded test material.
-- Added source comments near the top of Python and batch files.
+## New in v0.2.6
 
-## Basic usage
+- Expanded style preset library with additional house, grime, hardcore, DnB, rave, rock and experimental styles.
+- Added requested styles such as Jump Up, Jersey Club, Footwork, Gabba, French House, Tech House, Goa Trance, Drill, Breakcore, Schranz, Frenchcore, Aggrotech, Japanoise and Death Industrial.
+- Presets are still alphabetically sorted and remain editable through `app/styles/style_presets.json`.
 
-1. Run `install_windows.bat` once.
-2. Run `run_windows.bat`.
-3. Select a `.mid` or `.midi` source file.
-4. Click **Analyze MIDI**.
-5. Choose a style, BPM, transformation intensity and repeated-note amount.
-6. Click **Create New Version**.
+## New in v0.2.5
 
-Generated files are written into the selected output folder.
+- Added more style presets from user/friend suggestions:
+  - Amapiano, Cumbia, Ragga, Electro Swing, UK Bass, UKG, Two Step, Acid Jazz, Rare Groove, Balearic
+  - plus Waltz, Cha-Cha-Cha, Salsa, Samba, Rumba, Polka, Bluegrass, New Age, Gregorian Chant, Minimal Wave, EBM, Shoegaze, Industrial Metal, Afro House, Makina, Phonk
+- Style presets remain alphabetically sorted.
+- Added **Play Source MIDI** for direct comparison with the selected input file.
+- Split output playback into **Play MIDI Output** and **Play WAV/MP3 Output**.
+- Expanded WAV sample rates: 22050, 32000, 44100, 48000, 96000, 128000 Hz.
+- GUI now uses a vertical scroll area, so controls should not be cut off on smaller screens.
+- Moved Theme into a dedicated **UI Options** section.
+- Themes are now external `.qss` files in `app/themes/`.
+- Added themes: Dark, Light, Matrix, Hell, Retro Amber, Ocean.
+- Added a language selector in **UI Options**.
+- Language files are external JSON files in `app/lang/`.
+- Added English and German UI language files.
 
-## Important controls
+## Core controls
 
-- **Style**: Selects the target musical direction.
-- **Random Style from seed**: Picks a style deterministically from the seed.
-- **Transformation intensity**: Controls how strongly the source is rewritten.
-- **BPM**: Controls the actual output tempo.
-- **Repeated note amount**: Controls how much repetitive note hammering is preserved or reduced.
-- **New random seed each render**: Default ON. Every render gets a new seed. Disable it to reproduce a previous result.
-- **Use style lead/melody instruments**: Default OFF. Enable it to force style-specific General MIDI lead/hook/pluck colors.
+- **Transformation intensity** controls how strongly the source song is transformed.
+- **BPM** controls actual tempo independently from transformation intensity.
+- **Repeated note amount** controls how much long same-note repetition is allowed.
+- **Seed** controls reproducible variation. Auto Seed is enabled by default.
+- **Random Style from seed** chooses a style deterministically from the seed.
+- **Use style lead/melody instruments** optionally changes lead/hook/pluck colors to the selected style's GM instrument choices.
 
-## Style files
+## Offline behavior
 
-The style system is modular:
+After `install_windows.bat` has installed the virtual environment once, `run_windows.bat` works offline. For fully offline reinstall on another machine, run `prepare_wheelhouse_online.bat` once on an internet-connected machine and keep the generated `wheelhouse` folder.
 
-- `app/styles/style_presets.json` is used by the engine.
-- `app/styles/electronic_styles.csv` is a readable overview table.
+## Files
 
-New styles can be added by appending objects to the JSON file. The engine fills missing fields with safe defaults, but the best results come from complete presets.
+- GUI: `app/midi_reimaginer_gui.py`
+- Core engine / CLI: `app/midi_reimaginer_core.py`
+- Styles: `app/styles/style_presets.json`
+- CSV style overview: `app/styles/electronic_styles.csv`
+- Themes: `app/themes/*.qss`
+- Languages: `app/lang/*.json`
+- Safe generated demo MIDI: `examples/test.mid`
 
-## Offline notes
+## Example CLI
 
-After the first setup has downloaded wheels into the local environment or wheelhouse, the program can run offline. WAV rendering is internal and does not need the Windows wavetable. MP3 export is optional and needs a real `ffmpeg.exe`.
-
-## Source
-
-Source/project note for standalone copies:
-https://github.com/zeittresor/Synthwave_Midi_Reimaginer
+```bat
+.venv\Scripts\python.exe app\midi_reimaginer_core.py examples\test.mid --style amapiano --seed 12345 --bpm 112 --repetition 0.40
+```
