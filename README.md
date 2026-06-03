@@ -2,8 +2,7 @@
 
 Offline-friendly PyQt6 tool for analyzing a source MIDI file and generating a new reimagined MIDI/WAV/optional MP3 version with selectable modular style presets.
 
-Source/project note for standalone copies:
-https://github.com/zeittresor/Synthwave_Midi_Reimaginer
+<img width="1183" height="1005" alt="2026-06-03 09_54_28-Synthwave MIDI Reimaginer GUI" src="https://github.com/user-attachments/assets/08ae0935-9662-48ac-b8b5-7a2ffdf87e4a" />
 
 ## New in v0.2.4
 
@@ -75,3 +74,8 @@ New styles can be added by appending objects to the JSON file. The engine fills 
 ## Offline notes
 
 After the first setup has downloaded wheels into the local environment or wheelhouse, the program can run offline. WAV rendering is internal and does not need the Windows wavetable. MP3 export is optional and needs a real `ffmpeg.exe`.
+
+## Source
+
+Source/project note for standalone copies:
+https://github.com/zeittresor/Synthwave_Midi_Reimaginer
