@@ -23,6 +23,8 @@ Symphonic Metal, Synthpop, Synthwave, Tango, Tech House, Techno, Techstep, Tradi
 EDM, Trip Hop, Tropical House, Two Step, UK Bass, UK Garage, UKG, Uplifting Trance, Vaporwave, Vocal House, Waltz,
 Western
 
+<img width="1169" height="965" alt="grafik" src="https://github.com/user-attachments/assets/30e02fc7-8b38-4798-9f89-13ed000b90df" />
+
 ## New in v0.2.9
 
 - Added **Keep source track volumes**. When enabled, generated replacement tracks keep closer to the original MIDI role/track loudness balance, even if instruments are changed.
