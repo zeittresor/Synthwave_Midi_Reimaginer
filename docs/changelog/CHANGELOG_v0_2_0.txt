@@ -1,0 +1,36 @@
+Synthwave MIDI Reimaginer GUI v0.2.0
+====================================
+
+New:
+- Added modular multi-style preset system.
+- Added Style dropdown in the GUI.
+- Added Random Style from seed checkbox.
+- Added external style preset files:
+  - app/styles/style_presets.json
+  - app/styles/electronic_styles.csv
+- Added CLI arguments:
+  - --style <style_id>
+  - --random-style
+- Output filename prefix now supports:
+  - {source}
+  - {style}
+  - {style_name}
+  - {seed}
+  - {source_hash}
+- Analysis TXT now records:
+  - source MIDI hash
+  - seed
+  - style mode manual/random
+  - requested style
+  - resolved style
+  - style preset version
+  - style instruments, meter and drum feel
+
+Improved:
+- The engine now uses style-specific BPM ranges, drum-feel, density, instrument programs, target registers, reverb/brightness values and harmony strictness.
+- Random style is deterministic from the generation seed: same seed + same style table = same resolved style.
+- Harmony lock now uses style-specific strictness so problematic high source tracks are pulled more consistently into compatible scale/chord material.
+
+Known notes:
+- The internal WAV renderer is still a compact built-in synth, not a full DAW-quality production renderer.
+- Some source MIDIs can still produce musically strange results if the source has conflicting keys or very sparse harmonic material, but the style/harmony rail should reduce the worst clashes.

@@ -1,0 +1,11 @@
+Synthwave MIDI Reimaginer GUI v0.1.1
+
+Hotfixes:
+- Keeps a strong Python reference to the active PyQt worker object. This fixes the analysis job staying busy forever on some systems.
+- Adds percentage progress output for MIDI analysis.
+- Adds a visible status line below the progress bar.
+- Worker exceptions now include full tracebacks in the log/error dialog.
+
+Expected behavior with examples/test.mid:
+- Analysis should finish in well under a second on a normal desktop PC.
+- The log should show track-by-track progress from 5% to 100%.

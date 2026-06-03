@@ -6,6 +6,7 @@ PyQt6 GUI for Synthwave MIDI Reimaginer.
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 import traceback
@@ -21,17 +22,33 @@ from PyQt6.QtWidgets import (
     QSpinBox, QTabWidget, QScrollArea
 )
 
-# Allow running directly from app folder or project root.
-APP_DIR = Path(__file__).resolve().parent
-ROOT_DIR = APP_DIR.parent
+# Allow running directly from app folder, project root, or a PyInstaller bundle.
+def app_base_dir() -> Path:
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parents[1]
+
+
+def app_resource_dir() -> Path:
+    if getattr(sys, "frozen", False):
+        return Path(getattr(sys, "_MEIPASS", app_base_dir())).resolve() / "app"
+    return Path(__file__).resolve().parent
+
+
+APP_DIR = app_resource_dir()
+ROOT_DIR = app_base_dir()
 if str(APP_DIR) not in sys.path:
     sys.path.insert(0, str(APP_DIR))
 
 import midi_reimaginer_core as core
 
-APP_VERSION = "0.2.7"
+APP_VERSION = "0.2.9"
 THEME_DIR = APP_DIR / "themes"
 LANG_DIR = APP_DIR / "lang"
+
+
+def display_path(path: str | Path) -> str:
+    return os.path.normpath(str(path))
 
 
 @dataclass
@@ -46,10 +63,12 @@ class JobSettings:
     target_bpm: float
     repetition: float
     use_style_instruments: bool
+    preserve_source_volumes: bool
     harmony_lock: bool
     seed: int | None
     style_id: str
     random_style: bool
+    use_feedback: bool
 
 
 class AnalyzeWorker(QObject):
@@ -94,10 +113,12 @@ class RenderWorker(QObject):
                 target_bpm=s.target_bpm,
                 repetition=s.repetition,
                 use_style_instruments=s.use_style_instruments,
+                preserve_source_volumes=s.preserve_source_volumes,
                 harmony_lock=s.harmony_lock,
                 seed=s.seed,
                 style_id=s.style_id,
                 random_style=s.random_style,
+                use_feedback=s.use_feedback,
                 progress=lambda text: self.log.emit(str(text)),
             )
             self.finished.emit(result)
@@ -206,6 +227,7 @@ class MainWindow(QMainWindow):
         self._retranslate_ui()
         self._update_style_combo_labels()
         self._update_style_info()
+        self._update_feedback_status()
 
     # -----------------------------
     # UI creation
@@ -235,20 +257,23 @@ class MainWindow(QMainWindow):
         self.prefix_label = QLabel()
         self.source_edit = QLineEdit()
         self.source_edit.setPlaceholderText("Choose a .mid or .midi file...")
-        self.output_edit = QLineEdit(str(ROOT_DIR / "output"))
+        self.output_edit = QLineEdit(display_path(ROOT_DIR / "output"))
         self.prefix_edit = QLineEdit("{source}_{style}_seed{seed}")
         self.browse_src_btn = QPushButton()
         self.browse_src_btn.clicked.connect(self.browse_source)
+        self.play_source_btn = QPushButton()
+        self.play_source_btn.clicked.connect(self.play_source_midi)
         self.browse_out_btn = QPushButton()
         self.browse_out_btn.clicked.connect(self.browse_output)
         fg.addWidget(self.source_label, 0, 0)
         fg.addWidget(self.source_edit, 0, 1)
         fg.addWidget(self.browse_src_btn, 0, 2)
+        fg.addWidget(self.play_source_btn, 0, 3)
         fg.addWidget(self.output_label, 1, 0)
         fg.addWidget(self.output_edit, 1, 1)
-        fg.addWidget(self.browse_out_btn, 1, 2)
+        fg.addWidget(self.browse_out_btn, 1, 2, 1, 2)
         fg.addWidget(self.prefix_label, 2, 0)
-        fg.addWidget(self.prefix_edit, 2, 1, 1, 2)
+        fg.addWidget(self.prefix_edit, 2, 1, 1, 3)
         main.addWidget(self.file_group)
 
         # Style section.
@@ -314,6 +339,8 @@ class MainWindow(QMainWindow):
         self.repetition_slider.valueChanged.connect(self._repetition_changed)
         self.use_style_instruments_cb = QCheckBox()
         self.use_style_instruments_cb.setChecked(False)
+        self.preserve_source_volumes_cb = QCheckBox()
+        self.preserve_source_volumes_cb.setChecked(False)
         og.addWidget(self.render_audio_cb, 0, 0)
         og.addWidget(self.render_mp3_cb, 0, 1)
         og.addWidget(self.sample_rate_label, 0, 2)
@@ -330,9 +357,10 @@ class MainWindow(QMainWindow):
         og.addWidget(self.harmony_lock_cb, 4, 0, 1, 2)
         og.addWidget(self.auto_seed_cb, 4, 2, 1, 2)
         og.addWidget(self.use_style_instruments_cb, 5, 0, 1, 2)
-        og.addWidget(self.seed_label, 5, 2)
-        og.addWidget(self.seed_spin, 5, 3)
-        og.addWidget(self.new_seed_btn, 5, 4)
+        og.addWidget(self.preserve_source_volumes_cb, 5, 2, 1, 3)
+        og.addWidget(self.seed_label, 6, 0)
+        og.addWidget(self.seed_spin, 6, 1, 1, 2)
+        og.addWidget(self.new_seed_btn, 6, 3, 1, 2)
         main.addWidget(self.render_group)
 
         # UI options section.
@@ -359,10 +387,28 @@ class MainWindow(QMainWindow):
         uig.addWidget(self.language_combo, 0, 3)
         main.addWidget(self.ui_group)
 
+        # Listener feedback / learning section.
+        self.feedback_group = QGroupBox()
+        fl = QGridLayout(self.feedback_group)
+        self.use_feedback_cb = QCheckBox()
+        self.use_feedback_cb.setChecked(True)
+        self.feedback_like_btn = QPushButton()
+        self.feedback_like_btn.clicked.connect(lambda: self.rate_last_result(1))
+        self.feedback_dislike_btn = QPushButton()
+        self.feedback_dislike_btn.clicked.connect(lambda: self.rate_last_result(-1))
+        self.feedback_reset_btn = QPushButton()
+        self.feedback_reset_btn.clicked.connect(self.reset_feedback_profile)
+        self.feedback_status_label = QLabel()
+        self.feedback_status_label.setWordWrap(True)
+        fl.addWidget(self.use_feedback_cb, 0, 0, 1, 2)
+        fl.addWidget(self.feedback_like_btn, 0, 2)
+        fl.addWidget(self.feedback_dislike_btn, 0, 3)
+        fl.addWidget(self.feedback_reset_btn, 0, 4)
+        fl.addWidget(self.feedback_status_label, 1, 0, 1, 5)
+        main.addWidget(self.feedback_group)
+
         # Action buttons.
         buttons = QHBoxLayout()
-        self.play_source_btn = QPushButton()
-        self.play_source_btn.clicked.connect(self.play_source_midi)
         self.analyze_btn = QPushButton()
         self.analyze_btn.clicked.connect(self.analyze_current)
         self.render_btn = QPushButton()
@@ -373,7 +419,7 @@ class MainWindow(QMainWindow):
         self.play_midi_btn.clicked.connect(self.play_last_midi)
         self.play_audio_btn = QPushButton()
         self.play_audio_btn.clicked.connect(self.play_last_audio)
-        for b in [self.play_source_btn, self.analyze_btn, self.render_btn, self.open_out_btn, self.play_midi_btn, self.play_audio_btn]:
+        for b in [self.analyze_btn, self.render_btn, self.open_out_btn, self.play_midi_btn, self.play_audio_btn]:
             buttons.addWidget(b)
         main.addLayout(buttons)
 
@@ -441,11 +487,17 @@ class MainWindow(QMainWindow):
         self.harmony_lock_cb.setText(self._tr("harmony_lock", "Harmony lock / fix clashing notes"))
         self.auto_seed_cb.setText(self._tr("auto_seed", "New random seed each render"))
         self.use_style_instruments_cb.setText(self._tr("use_style_instruments", "Use style lead/melody instruments"))
+        self.preserve_source_volumes_cb.setText(self._tr("preserve_source_volumes", "Keep source track volumes"))
         self.seed_label.setText(self._tr("seed", "Seed:"))
         self.new_seed_btn.setText(self._tr("new_seed", "New Seed"))
         self.ui_group.setTitle(self._tr("group_ui", "4. UI Options"))
         self.theme_label.setText(self._tr("theme", "Theme:"))
         self.language_label.setText(self._tr("language", "Language:"))
+        self.feedback_group.setTitle(self._tr("group_feedback", "5. Listener Feedback / Learning"))
+        self.use_feedback_cb.setText(self._tr("use_feedback", "Use feedback profile for future renders"))
+        self.feedback_like_btn.setText(self._tr("feedback_like", "👍 Like Last"))
+        self.feedback_dislike_btn.setText(self._tr("feedback_dislike", "👎 Dislike Last"))
+        self.feedback_reset_btn.setText(self._tr("feedback_reset", "Reset Feedback"))
         self.play_source_btn.setText(self._tr("play_source", "Play Source MIDI"))
         self.analyze_btn.setText(self._tr("analyze", "Analyze MIDI"))
         self.render_btn.setText(self._tr("create", "Create New Version"))
@@ -476,8 +528,13 @@ class MainWindow(QMainWindow):
         self.new_seed_btn.setToolTip(self._tr("tt_new_seed", "Generate a new manual seed number and switch Auto Seed off."))
         self.sample_rate.setToolTip(self._tr("tt_sample_rate", "WAV sample rate. 44100 is usually enough; 22050 is smaller/faster; 96000+ is high resolution and slower."))
         self.use_style_instruments_cb.setToolTip(self._tr("tt_style_instruments", "Default OFF. When enabled, lead/hook/pluck/echo tracks use the selected style's recommended GM instruments."))
+        self.preserve_source_volumes_cb.setToolTip(self._tr("tt_preserve_source_volumes", "Default OFF. When enabled, generated replacement tracks keep roughly the same role/track volume balance as the source MIDI."))
         self.theme_combo.setToolTip(self._tr("tt_theme", "UI theme only. Theme files live in app/themes as .qss files."))
         self.language_combo.setToolTip(self._tr("tt_language", "Interface language. Language files live in app/lang as JSON files."))
+        self.use_feedback_cb.setToolTip(self._tr("tt_use_feedback", "When enabled, thumbs-up/down ratings gently bias future renders toward settings and styles you liked. Local only; stored in app_data/feedback/ratings.json."))
+        self.feedback_like_btn.setToolTip(self._tr("tt_feedback_like", "Save a thumbs-up rating for the last generated result."))
+        self.feedback_dislike_btn.setToolTip(self._tr("tt_feedback_dislike", "Save a thumbs-down rating for the last generated result."))
+        self.feedback_reset_btn.setToolTip(self._tr("tt_feedback_reset", "Delete all local feedback ratings and start learning from scratch."))
         self.play_source_btn.setToolTip(self._tr("tt_play_source", "Open the selected source MIDI in your default MIDI player for comparison."))
         self.play_midi_btn.setToolTip(self._tr("tt_play_midi", "Open the last generated MIDI in your default MIDI player."))
         self.play_audio_btn.setToolTip(self._tr("tt_play_audio", "Open the last generated WAV or MP3 in your default audio player."))
@@ -497,6 +554,8 @@ This tool analyzes a MIDI file and creates a cleaned-up derivative version using
 - **Seed** controls reproducible variation. Auto Seed is ON by default.
 - **Random Style from seed** chooses a style deterministically from the seed.
 - **Play Source MIDI**, **Play MIDI Output**, and **Play WAV/MP3 Output** make comparison easier.
+- **Listener Feedback** lets you rate the last render with thumbs up/down. Future renders can gently follow your local preference profile.
+- **Keep source track volumes** keeps generated role volumes closer to the original MIDI balance, even when instruments are replaced.
 
 ## Modular files
 
@@ -504,6 +563,7 @@ This tool analyzes a MIDI file and creates a cleaned-up derivative version using
 - CSV overview: `app/styles/electronic_styles.csv`
 - UI themes: `app/themes/*.qss`
 - UI language files: `app/lang/*.json`
+- Feedback profile: `app_data/feedback/ratings.json`
 """)
 
     # -----------------------------
@@ -602,16 +662,16 @@ This tool analyzes a MIDI file and creates a cleaned-up derivative version using
         start = str(Path(self.source_edit.text()).parent) if self.source_edit.text() else str(ROOT_DIR)
         path, _ = QFileDialog.getOpenFileName(self, self._tr("choose_midi", "Choose MIDI file"), start, "MIDI files (*.mid *.midi);;All files (*.*)")
         if path:
-            self.source_edit.setText(path)
+            self.source_edit.setText(display_path(path))
             src = Path(path)
-            self.output_edit.setText(str(src.parent / "reimagined_output"))
+            self.output_edit.setText(display_path(src.parent / "reimagined_output"))
             self.prefix_edit.setText("{source}_{style}_seed{seed}")
 
     def browse_output(self):
         start = self.output_edit.text() or str(ROOT_DIR / "output")
         path = QFileDialog.getExistingDirectory(self, self._tr("choose_output", "Choose output folder"), start)
         if path:
-            self.output_edit.setText(path)
+            self.output_edit.setText(display_path(path))
 
     def _source_path(self) -> Path | None:
         path = Path(self.source_edit.text().strip().strip('"'))
@@ -644,10 +704,12 @@ This tool analyzes a MIDI file and creates a cleaned-up derivative version using
             target_bpm=float(self.bpm_slider.value()),
             repetition=self.repetition_slider.value() / 100.0,
             use_style_instruments=self.use_style_instruments_cb.isChecked(),
+            preserve_source_volumes=self.preserve_source_volumes_cb.isChecked(),
             harmony_lock=self.harmony_lock_cb.isChecked(),
             seed=seed,
             style_id=self._selected_style_id(),
             random_style=self.random_style_cb.isChecked(),
+            use_feedback=self.use_feedback_cb.isChecked(),
         )
 
     # -----------------------------
@@ -670,7 +732,7 @@ This tool analyzes a MIDI file and creates a cleaned-up derivative version using
         self._log(text)
 
     def _set_busy(self, busy: bool):
-        for w in [self.play_source_btn, self.analyze_btn, self.render_btn, self.open_out_btn, self.play_midi_btn, self.play_audio_btn]:
+        for w in [self.play_source_btn, self.analyze_btn, self.render_btn, self.open_out_btn, self.play_midi_btn, self.play_audio_btn, self.feedback_like_btn, self.feedback_dislike_btn, self.feedback_reset_btn]:
             w.setEnabled(not busy)
         self.progress.setRange(0, 100)
         if busy:
@@ -720,7 +782,7 @@ This tool analyzes a MIDI file and creates a cleaned-up derivative version using
                 random=" (random)" if settings.random_style else "",
                 bpm=settings.target_bpm,
                 repetition=settings.repetition,
-            )
+            ) + (" | feedback learning ON" if settings.use_feedback else " | feedback learning OFF")
         )
         self.worker_thread = QThread(self)
         worker = RenderWorker(settings)
@@ -743,8 +805,9 @@ This tool analyzes a MIDI file and creates a cleaned-up derivative version using
         self.analysis_text.setPlainText(result.get("summary", ""))
         self.status_label.setText(self._tr("status_render_finished", "Status: Render finished"))
         self._log(self._tr("done", "Done."))
+        self._update_feedback_status()
         self.worker = None
-        files = "\n".join(f"{k.upper()}: {v}" for k, v in result.items() if k != "summary" and v)
+        files = "\n".join(f"{k.upper()}: {result.get(k)}" for k in ("midi", "wav", "mp3", "analysis") if result.get(k))
         QMessageBox.information(self, self._tr("render_finished_title", "Render finished"), self._tr("render_finished_msg", "Created files:\n\n{files}").format(files=files))
 
     def _job_failed(self, error: str):
@@ -753,6 +816,51 @@ This tool analyzes a MIDI file and creates a cleaned-up derivative version using
         self._log(f"ERROR: {error}")
         self.worker = None
         QMessageBox.critical(self, self._tr("error", "Error"), error)
+
+    # -----------------------------
+    # Feedback / learning actions
+    # -----------------------------
+    def _feedback_summary_text(self) -> str:
+        summary = core.feedback_summary(core.load_feedback_profile())
+        total = int(summary.get("total", 0) or 0)
+        up = int(summary.get("up", 0) or 0)
+        down = int(summary.get("down", 0) or 0)
+        best = summary.get("best_style") or "-"
+        return self._tr(
+            "feedback_status",
+            "Feedback profile: {total} rating(s), 👍 {up}, 👎 {down}. Best style so far: {best}."
+        ).format(total=total, up=up, down=down, best=best)
+
+    def _update_feedback_status(self):
+        if hasattr(self, "feedback_status_label"):
+            self.feedback_status_label.setText(self._feedback_summary_text())
+
+    def rate_last_result(self, rating: int):
+        if not self.last_result:
+            QMessageBox.information(
+                self,
+                self._tr("no_render_title", "No render yet"),
+                self._tr("no_rating_msg", "Generate a version first, then rate the result."),
+            )
+            return
+        summary = core.append_feedback_rating(self.last_result, 1 if rating > 0 else -1)
+        self._update_feedback_status()
+        label = self._tr("liked", "liked") if rating > 0 else self._tr("disliked", "disliked")
+        self._log(self._tr("feedback_saved_log", "Feedback saved: {label}. Profile now has {total} rating(s).").format(label=label, total=summary.get("total", 0)))
+        self.status_label.setText(self._tr("feedback_saved_status", "Status: Feedback saved - future renders can use this preference profile"))
+
+    def reset_feedback_profile(self):
+        reply = QMessageBox.question(
+            self,
+            self._tr("reset_feedback_title", "Reset feedback profile"),
+            self._tr("reset_feedback_msg", "Delete all saved thumbs-up/down ratings? This cannot be undone."),
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        core.reset_feedback_profile()
+        self._update_feedback_status()
+        self._log(self._tr("feedback_reset_log", "Feedback profile reset."))
+        self.status_label.setText(self._tr("feedback_reset_status", "Status: Feedback profile reset"))
 
     # -----------------------------
     # Seed and playback actions

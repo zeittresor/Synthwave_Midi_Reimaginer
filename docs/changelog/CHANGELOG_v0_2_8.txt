@@ -1,0 +1,14 @@
+Synthwave MIDI Reimaginer GUI v0.2.8
+=====================================
+
+- Added local listener feedback / preference learning.
+- Added thumbs-up/down buttons for the last generated result.
+- Added a reset button for the local feedback profile.
+- Feedback is stored locally in app_data/feedback/ratings.json.
+- Future renders can gently bias intensity, BPM, accompaniment relaxation, harmony lock and instrument-mode choices toward liked results.
+- Random style selection can use feedback weighting while remaining seed-reproducible.
+- Moved Play Source MIDI into the Source / Output section.
+- Added compile_windows_pyinstaller.bat for Windows EXE builds.
+- Added PyInstaller-aware resource paths for styles, themes and language files.
+- Changelogs are kept in docs/changelog/.
+- Removed personal-name/original-song references from project docs/changelogs.

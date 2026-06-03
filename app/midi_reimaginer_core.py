@@ -22,9 +22,33 @@ import random
 import secrets
 import shutil
 import subprocess
+import sys
 import wave
+from datetime import datetime, timezone
 
 Progress = Callable[[str], None]
+
+
+# -----------------------------
+# Runtime/resource paths
+# -----------------------------
+def app_base_dir() -> Path:
+    """Writable application base directory.
+
+    In normal source runs this is the project folder. In a PyInstaller build it
+    is the folder containing the EXE, so app_data/feedback remains persistent.
+    """
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parents[1]
+
+
+def app_resource_dir() -> Path:
+    """Read-only app resource directory for bundled style/theme/lang data."""
+    if getattr(sys, "frozen", False):
+        return Path(getattr(sys, "_MEIPASS", app_base_dir())).resolve() / "app"
+    return Path(__file__).resolve().parent
+
 
 # -----------------------------
 # Minimal MIDI reader / writer
@@ -77,6 +101,8 @@ class TrackAnalysis:
     min_pitch: int = 0
     max_pitch: int = 0
     avg_dur: float = 0.0
+    avg_velocity: float = 0.0
+    volume_level: float = 100.0
     density: float = 0.0
     poly_score: float = 0.0
     is_drum: bool = False
@@ -126,7 +152,7 @@ STYLE_PRESET_VERSION = 4
 
 
 def _styles_dir() -> Path:
-    return Path(__file__).resolve().parent / "styles"
+    return app_resource_dir() / "styles"
 
 
 def _style_json_path() -> Path:
@@ -221,6 +247,284 @@ def resolve_style_preset(style_id: str | None = "synthwave", *, random_style: bo
         rng = random.Random(normalize_seed(seed))
         return dict(rng.choice(styles))
     return get_style_by_id(style_id)
+
+
+
+
+# -----------------------------
+# Listener feedback / preference learning
+# -----------------------------
+FEEDBACK_PROFILE_VERSION = 1
+
+
+def default_feedback_path() -> Path:
+    """Default local feedback profile path. Kept outside app/ so it survives code updates if copied over."""
+    return app_base_dir() / "app_data" / "feedback" / "ratings.json"
+
+
+def _empty_feedback_profile() -> dict:
+    return {"version": FEEDBACK_PROFILE_VERSION, "ratings": []}
+
+
+def load_feedback_profile(path: Path | str | None = None) -> dict:
+    path = Path(path) if path else default_feedback_path()
+    if not path.exists():
+        return _empty_feedback_profile()
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            return _empty_feedback_profile()
+        data.setdefault("version", FEEDBACK_PROFILE_VERSION)
+        ratings = data.get("ratings", [])
+        if not isinstance(ratings, list):
+            ratings = []
+        data["ratings"] = [r for r in ratings if isinstance(r, dict)]
+        return data
+    except Exception:
+        return _empty_feedback_profile()
+
+
+def save_feedback_profile(profile: dict, path: Path | str | None = None) -> Path:
+    path = Path(path) if path else default_feedback_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    profile = dict(profile or {})
+    profile["version"] = FEEDBACK_PROFILE_VERSION
+    profile.setdefault("ratings", [])
+    path.write_text(json.dumps(profile, indent=2, ensure_ascii=False), encoding="utf-8")
+    return path
+
+
+def reset_feedback_profile(path: Path | str | None = None) -> Path:
+    return save_feedback_profile(_empty_feedback_profile(), path)
+
+
+def append_feedback_rating(result: dict, rating: int, path: Path | str | None = None, note: str = "") -> dict:
+    """Append a thumbs-up/thumbs-down rating for the last render result."""
+    profile = load_feedback_profile(path)
+    rating = 1 if int(rating) > 0 else -1
+    result = dict(result or {})
+    entry = {
+        "time_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "rating": rating,
+        "source_hash": result.get("source_hash"),
+        "requested_style": result.get("requested_style") or result.get("style"),
+        "style": result.get("style"),
+        "style_name": result.get("style_name"),
+        "seed": result.get("seed"),
+        "random_style": bool(result.get("random_style")),
+        "intensity": result.get("intensity"),
+        "effective_intensity": result.get("effective_intensity", result.get("intensity")),
+        "target_bpm": result.get("target_bpm"),
+        "effective_bpm": result.get("effective_bpm", result.get("target_bpm")),
+        "accompaniment_relaxation": result.get("accompaniment_relaxation", result.get("repetition")),
+        "effective_accompaniment_relaxation": result.get("effective_accompaniment_relaxation", result.get("accompaniment_relaxation", result.get("repetition"))),
+        "harmony_lock": result.get("harmony_lock"),
+        "use_style_instruments": result.get("use_style_instruments"),
+        "preserve_source_volumes": result.get("preserve_source_volumes"),
+        "midi": result.get("midi"),
+        "wav": result.get("wav"),
+        "mp3": result.get("mp3"),
+        "analysis": result.get("analysis"),
+        "note": str(note or "")[:500],
+    }
+    profile.setdefault("ratings", []).append(entry)
+    # Keep the file small enough for long-term casual use.
+    profile["ratings"] = profile["ratings"][-2000:]
+    save_feedback_profile(profile, path)
+    return feedback_summary(profile)
+
+
+def feedback_summary(profile: dict | None = None) -> dict:
+    profile = profile if profile is not None else load_feedback_profile()
+    ratings = [r for r in profile.get("ratings", []) if isinstance(r, dict)]
+    up = sum(1 for r in ratings if int(r.get("rating", 0)) > 0)
+    down = sum(1 for r in ratings if int(r.get("rating", 0)) < 0)
+    by_style: dict[str, dict[str, int]] = {}
+    for r in ratings:
+        sid = str(r.get("style") or "unknown")
+        item = by_style.setdefault(sid, {"up": 0, "down": 0})
+        if int(r.get("rating", 0)) > 0:
+            item["up"] += 1
+        elif int(r.get("rating", 0)) < 0:
+            item["down"] += 1
+    best_style = None
+    best_score = -10**9
+    for sid, v in by_style.items():
+        score = v["up"] * 2 - v["down"]
+        if score > best_score:
+            best_score = score
+            best_style = sid
+    return {"total": len(ratings), "up": up, "down": down, "by_style": by_style, "best_style": best_style}
+
+
+def _rating_weight(entry: dict, style_id: str, source_hash: str | None) -> float:
+    weight = 1.0
+    if str(entry.get("style") or "") == str(style_id):
+        weight += 2.0
+    if source_hash and entry.get("source_hash") == source_hash:
+        weight += 2.0
+    return weight
+
+
+def _weighted_avg(entries: list[tuple[dict, float]], key: str, fallback: float | None = None) -> float | None:
+    total = 0.0
+    acc = 0.0
+    for e, w in entries:
+        val = e.get(key)
+        if val is None:
+            continue
+        try:
+            f = float(val)
+        except Exception:
+            continue
+        acc += f * w
+        total += w
+    if total <= 0.0:
+        return fallback
+    return acc / total
+
+
+def compute_feedback_bias(profile: dict, style_id: str, source_hash: str | None = None) -> dict:
+    """Summarize listener feedback relevant to a style/source.
+
+    This is intentionally lightweight and deterministic. It does not train a
+    model; it uses user ratings as a local preference profile.
+    """
+    ratings = [r for r in profile.get("ratings", []) if isinstance(r, dict)]
+    relevant: list[tuple[dict, float]] = []
+    positives: list[tuple[dict, float]] = []
+    negatives: list[tuple[dict, float]] = []
+    for r in ratings:
+        w = _rating_weight(r, style_id, source_hash)
+        # Far-away styles still provide a tiny global preference signal.
+        if str(r.get("style") or "") != str(style_id) and (not source_hash or r.get("source_hash") != source_hash):
+            w = 0.35
+        val = 1 if int(r.get("rating", 0)) > 0 else -1 if int(r.get("rating", 0)) < 0 else 0
+        if val == 0:
+            continue
+        relevant.append((r, w))
+        (positives if val > 0 else negatives).append((r, w))
+    pos_w = sum(w for _, w in positives)
+    neg_w = sum(w for _, w in negatives)
+    total_w = pos_w + neg_w
+    if total_w <= 0:
+        return {"enabled": False, "confidence": 0.0, "profile_count": 0}
+    approval = (pos_w - neg_w) / max(0.001, total_w)
+    confidence = min(0.45, 0.06 * total_w)
+    # Positive ratings define the target; if there are only dislikes, reduce
+    # confidence and only apply defensive smoothing.
+    target_entries = positives if positives else relevant
+    pref_intensity = _weighted_avg(target_entries, "effective_intensity", _weighted_avg(target_entries, "intensity", None))
+    pref_bpm = _weighted_avg(target_entries, "effective_bpm", _weighted_avg(target_entries, "target_bpm", None))
+    pref_relax = _weighted_avg(target_entries, "effective_accompaniment_relaxation", _weighted_avg(target_entries, "accompaniment_relaxation", None))
+    pref_style_instr = _weighted_avg(target_entries, "use_style_instruments", None)
+    pref_preserve_volumes = _weighted_avg(target_entries, "preserve_source_volumes", None)
+    pref_harmony = _weighted_avg(target_entries, "harmony_lock", None)
+    return {
+        "enabled": True,
+        "confidence": confidence,
+        "approval": approval,
+        "profile_count": len(relevant),
+        "positive_weight": pos_w,
+        "negative_weight": neg_w,
+        "preferred_intensity": pref_intensity,
+        "preferred_bpm": pref_bpm,
+        "preferred_accompaniment_relaxation": pref_relax,
+        "preferred_style_instruments": pref_style_instr,
+        "preferred_preserve_source_volumes": pref_preserve_volumes,
+        "preferred_harmony_lock": pref_harmony,
+    }
+
+
+def apply_feedback_preferences(
+    *,
+    profile: dict,
+    style_preset: dict,
+    source_hash: str | None,
+    intensity: float,
+    target_bpm: float | None,
+    repetition: float,
+    use_style_instruments: bool,
+    preserve_source_volumes: bool,
+    harmony_lock: bool,
+    progress: Progress | None = None,
+) -> tuple[dict, float, float | None, float, bool, bool, bool, dict]:
+    style_id = str(style_preset.get("id", "synthwave"))
+    bias = compute_feedback_bias(profile, style_id, source_hash)
+    if not bias.get("enabled") or bias.get("confidence", 0.0) <= 0:
+        return style_preset, intensity, target_bpm, repetition, use_style_instruments, preserve_source_volumes, harmony_lock, bias
+    c = float(bias.get("confidence", 0.0))
+    approval = float(bias.get("approval", 0.0))
+    eff_intensity = float(intensity)
+    eff_bpm = target_bpm
+    eff_repetition = float(repetition)
+    if bias.get("preferred_intensity") is not None:
+        eff_intensity = mix_float(eff_intensity, float(bias["preferred_intensity"]), c * 0.30)
+    if target_bpm is not None and bias.get("preferred_bpm") is not None:
+        eff_bpm = mix_float(float(target_bpm), float(bias["preferred_bpm"]), c * 0.22)
+    if bias.get("preferred_accompaniment_relaxation") is not None:
+        eff_repetition = mix_float(eff_repetition, float(bias["preferred_accompaniment_relaxation"]), c * 0.38)
+    # Only touch boolean preferences if there is a reasonably strong signal.
+    eff_use_style_instr = bool(use_style_instruments)
+    if bias.get("preferred_style_instruments") is not None and c > 0.18:
+        p = float(bias["preferred_style_instruments"])
+        if p > 0.72:
+            eff_use_style_instr = True
+        elif p < 0.28:
+            eff_use_style_instr = False
+    eff_preserve_volumes = bool(preserve_source_volumes)
+    if bias.get("preferred_preserve_source_volumes") is not None and c > 0.24:
+        p = float(bias["preferred_preserve_source_volumes"])
+        if p > 0.76:
+            eff_preserve_volumes = True
+        elif p < 0.24:
+            eff_preserve_volumes = False
+    eff_harmony = bool(harmony_lock)
+    if bias.get("preferred_harmony_lock") is not None and c > 0.22:
+        p = float(bias["preferred_harmony_lock"])
+        if p > 0.78:
+            eff_harmony = True
+        elif p < 0.22:
+            eff_harmony = False
+    # Defensive preset nudging: disliked profiles get less rapid accompaniment
+    # and stricter harmony; liked profiles keep more of the user's preferred vibe.
+    adjusted = dict(style_preset)
+    if approval < -0.15:
+        adjusted["arp_density"] = max(0.05, style_float(adjusted, "arp_density", 0.6) * (1.0 - min(0.35, c)))
+        adjusted["pad_density"] = min(1.0, style_float(adjusted, "pad_density", 0.7) + min(0.18, c * 0.5))
+        adjusted["harmony_strictness"] = min(1.0, style_float(adjusted, "harmony_strictness", 0.88) + min(0.16, c * 0.45))
+    log(progress, f"Feedback learning: ON - {bias.get('profile_count', 0)} relevant rating(s), influence {c:.2f}, approval {approval:+.2f}")
+    log(progress, f"Feedback effective settings: intensity {eff_intensity:.2f}, BPM {eff_bpm if eff_bpm is not None else 'auto'}, accompaniment relaxation {eff_repetition:.2f}")
+    return adjusted, clamp01(eff_intensity), eff_bpm, clamp01(eff_repetition), eff_use_style_instr, eff_preserve_volumes, eff_harmony, bias
+
+
+def resolve_style_preset_with_feedback(style_id: str | None = "synthwave", *, random_style: bool = False, seed: int | None = None, profile: dict | None = None) -> dict:
+    """Resolve style. In random mode, feedback biases the seed-stable random choice."""
+    styles = load_style_presets()
+    if not random_style:
+        return get_style_by_id(style_id)
+    if not profile or not profile.get("ratings"):
+        return resolve_style_preset(style_id, random_style=True, seed=seed)
+    summary = feedback_summary(profile)
+    by_style = summary.get("by_style", {}) if isinstance(summary, dict) else {}
+    weighted: list[tuple[dict, float]] = []
+    for st in styles:
+        sid = str(st.get("id"))
+        v = by_style.get(sid, {}) if isinstance(by_style, dict) else {}
+        up = float(v.get("up", 0))
+        down = float(v.get("down", 0))
+        # Never make a style impossible; liked styles simply get more tickets.
+        weight = max(0.25, 1.0 + up * 1.7 - down * 0.75)
+        weighted.append((st, weight))
+    rng = random.Random(normalize_seed(seed))
+    total = sum(w for _, w in weighted)
+    pick = rng.random() * total
+    acc = 0.0
+    for st, w in weighted:
+        acc += w
+        if pick <= acc:
+            return dict(st)
+    return dict(weighted[-1][0])
 
 
 def style_float(style: dict, key: str, default: float, lo: float | None = None, hi: float | None = None) -> float:
@@ -502,6 +806,24 @@ def get_tempo_and_sig(tracks: list[Track]) -> tuple[int, tuple[int, int, int, in
     return tempo, sig
 
 
+def estimate_track_volume_level(track: Track, notes: list[Note]) -> tuple[float, float]:
+    """Estimate a track's source loudness from MIDI CC7 and note velocities.
+
+    This is intentionally simple and offline-safe. It lets generated replacement
+    instruments stay close to the perceived level of the source track when the
+    user enables the preserve-volume option.
+    """
+    cc7_values: list[int] = []
+    for e in track.events:
+        if e.status is not None and e.channel is not None and (e.status & 0xF0) == 0xB0 and len(e.data) >= 2:
+            if int(e.data[0]) == 7:
+                cc7_values.append(int(e.data[1]))
+    cc7_level = float(sum(cc7_values) / len(cc7_values)) if cc7_values else 100.0
+    avg_velocity = float(sum(n.vel for n in notes) / len(notes)) if notes else 90.0
+    combined = float(clip(0.55 * cc7_level + 0.45 * avg_velocity, 16, 127))
+    return avg_velocity, combined
+
+
 def estimate_poly_score(notes: list[Note]) -> float:
     if not notes:
         return 0.0
@@ -526,10 +848,11 @@ def classify_tracks(source: Path, fmt: int, div: int, tracks: list[Track], progr
             durations = [n.duration for n in notes]
             chs = Counter(n.ch for n in notes)
             progs = Counter(n.program for n in notes)
+            avg_velocity, volume_level = estimate_track_volume_level(t, notes)
             ta = TrackAnalysis(
                 index=idx, name=t.name or f"Track {idx}", notes=notes, channels=chs, programs=progs,
                 avg_pitch=sum(pitches) / len(pitches), min_pitch=min(pitches), max_pitch=max(pitches),
-                avg_dur=sum(durations) / len(durations), density=len(notes) / max(1, end_tick / div),
+                avg_dur=sum(durations) / len(durations), avg_velocity=avg_velocity, volume_level=volume_level, density=len(notes) / max(1, end_tick / div),
                 poly_score=estimate_poly_score(notes), is_drum=(chs.most_common(1)[0][0] == 9),
             )
             high_count = sum(1 for p in pitches if p >= 88)
@@ -610,7 +933,8 @@ def classify_tracks(source: Path, fmt: int, div: int, tracks: list[Track], progr
         else:
             lines.append(
                 f"  #{a.index:02d} {a.name}: {len(a.notes)} notes, role={a.role}, "
-                f"pitch {a.min_pitch}-{a.max_pitch}, avg {a.avg_pitch:.1f}, density {a.density:.2f}/quarter"
+                f"pitch {a.min_pitch}-{a.max_pitch}, avg {a.avg_pitch:.1f}, density {a.density:.2f}/quarter, "
+                f"avg velocity {a.avg_velocity:.1f}, source volume {a.volume_level:.1f}"
             )
     return MidiAnalysis(source, fmt, div, len(tracks), end_tick, tempo_us, bpm, sig, analyses, roles, "\n".join(lines))
 
@@ -630,6 +954,47 @@ def notes_for_role(analysis: MidiAnalysis, role: str) -> list[Note]:
     if idx is None or idx >= len(analysis.tracks):
         return []
     return analysis.tracks[idx].notes
+
+
+def source_volume_level_for_role(analysis: MidiAnalysis, role: str, default: float = 100.0) -> float:
+    """Return an estimated source volume for a musical role.
+
+    Role fallbacks intentionally map generated replacement tracks to the closest
+    source material, so changed instruments can still keep the original track
+    balance when requested.
+    """
+    fallback_roles = {
+        "bass": ["bass"],
+        "drums": ["drums"],
+        "lead": ["lead", "hook_problem", "pad_source"],
+        "hook": ["hook_problem", "lead", "arp"],
+        "pluck": ["arp", "lead", "pad_source"],
+        "vibe": ["arp", "pad_source", "lead"],
+        "ticks": ["arp", "hook_problem", "lead"],
+        "pad": ["pad_source", "lead", "arp"],
+        "relief": ["pad_source", "lead"],
+        "echo": ["lead", "arp", "pad_source"],
+    }
+    for r in fallback_roles.get(role, [role]):
+        idx = analysis.roles.get(r)
+        if idx is not None and 0 <= idx < len(analysis.tracks):
+            tr = analysis.tracks[idx]
+            if tr.notes:
+                return float(tr.volume_level or default)
+    # Fallback to the average melodic/drum level rather than a fixed loudness.
+    levels = [float(t.volume_level) for t in analysis.tracks if t.notes and (not t.is_drum or role == "drums")]
+    if levels:
+        return float(sum(levels) / len(levels))
+    return float(default)
+
+
+def source_preserved_volume(analysis: MidiAnalysis, role: str, base_volume: float, preserve: bool) -> int:
+    if not preserve:
+        return clip(base_volume, 0, 127)
+    source_level = source_volume_level_for_role(analysis, role, default=base_volume)
+    # Strongly favor source level, but retain a little style balance so the mix
+    # does not collapse when a very quiet source track is mapped to a lead role.
+    return clip(mix_float(base_volume, source_level, 0.82), 12, 127)
 
 
 def all_melodic_notes(analysis: MidiAnalysis) -> list[Note]:
@@ -987,6 +1352,7 @@ def build_reimagined_midi(
     target_bpm: float | None = None,
     repetition: float = 0.50,
     use_style_instruments: bool = False,
+    preserve_source_volumes: bool = False,
     preserve_length: bool = True,
     harmony_lock: bool = True,
     seed: int | None = None,
@@ -1028,11 +1394,21 @@ def build_reimagined_midi(
     log(progress, f"Accompaniment relaxation: {accomp_relaxation:.2f} (0=dense pulses, 1=sparser/pad relief)")
     log(progress, f"Style preset: {style_name} ({style_slug})")
     log(progress, f"Style lead/melody instruments: {'ON' if use_style_instruments else 'OFF'}")
+    log(progress, f"Preserve source track volumes: {'ON' if preserve_source_volumes else 'OFF'}")
     analysis = analyze_midi(src, progress=progress)
     div = analysis.division
     bar = div * 4
     song_end = analysis.end_tick if preserve_length else min(analysis.end_tick, 96 * bar)
     song_end = max(song_end, 8 * bar)
+
+    def role_volume(role: str, base_volume: float) -> int:
+        return source_preserved_volume(analysis, role, base_volume, preserve_source_volumes)
+
+    if preserve_source_volumes:
+        volume_bits = []
+        for role in ("bass", "lead", "hook", "pluck", "pad", "drums"):
+            volume_bits.append(f"{role}={source_volume_level_for_role(analysis, role):.1f}")
+        log(progress, "Source volume profile: " + ", ".join(volume_bits))
 
     # Tempo now follows the slider. 0% stays very close to source BPM, 100% follows the style BPM window.
     bpm_min = style_float(style_preset, "bpm_min", 88.0, 40.0, 220.0)
@@ -1139,7 +1515,7 @@ def build_reimagined_midi(
     bass_src = notes_for_role(analysis, "bass") or [n for n in all_notes if n.pitch < 60] or all_notes[:]
     if not bass_src:
         bass_src = [Note(0, song_end, 48, 90, 1)]
-    bass = setup_track(f"{style_name.upper()} BASS", ch=1, program=resolved_program(style_preset, "bass", 38, use_style_instruments=True), volume=int(104 + distortion * 20), pan=48, reverb=int(8 + reverb_amount * 24), chorus=int(14 + brightness * 18))
+    bass = setup_track(f"{style_name.upper()} BASS", ch=1, program=resolved_program(style_preset, "bass", 38, use_style_instruments=True), volume=role_volume("bass", 104 + distortion * 20), pan=48, reverb=int(8 + reverb_amount * 24), chorus=int(14 + brightness * 18))
     for n in bass_src:
         if n.start >= song_end:
             continue
@@ -1179,7 +1555,7 @@ def build_reimagined_midi(
     # Arp / pluck.
     # -----------------------------
     arp_src = notes_for_role(analysis, "arp") or all_notes
-    pluck = setup_track(f"{style_name.upper()} PLUCK / ARP", ch=2, program=resolved_program(style_preset, "pluck", 5, use_style_instruments=use_style_instruments), volume=int(64 + brightness * 30 + rewrite * 8), pan=82, reverb=int(18 + reverb_amount * 48), chorus=int(12 + brightness * 30))
+    pluck = setup_track(f"{style_name.upper()} PLUCK / ARP", ch=2, program=resolved_program(style_preset, "pluck", 5, use_style_instruments=use_style_instruments), volume=role_volume("pluck", 64 + brightness * 30 + rewrite * 8), pan=82, reverb=int(18 + reverb_amount * 48), chorus=int(12 + brightness * 30))
     skip_mod = max(2, int(round(15 - 10 * arp_density - 4 * rewrite)))
     for i, n in enumerate(arp_src):
         if n.start >= song_end:
@@ -1224,7 +1600,7 @@ def build_reimagined_midi(
     # Glass support copied from source, progressively replaced by seed-safe accents.
     # -----------------------------
     vibe_src = all_notes if len(all_notes) < 200 else sorted(all_notes, key=lambda n: (n.start, n.pitch))[vibe_offset::2]
-    vibe = setup_track(f"{style_name.upper()} GLASS SUPPORT", ch=3, program=resolved_program(style_preset, "vibe", 11, use_style_instruments=use_style_instruments), volume=int(46 + brightness * 34), pan=36, reverb=int(24 + reverb_amount * 58), chorus=int(16 + brightness * 34))
+    vibe = setup_track(f"{style_name.upper()} GLASS SUPPORT", ch=3, program=resolved_program(style_preset, "vibe", 11, use_style_instruments=use_style_instruments), volume=role_volume("vibe", 46 + brightness * 34), pan=36, reverb=int(24 + reverb_amount * 58), chorus=int(16 + brightness * 34))
     for i, n in enumerate(vibe_src):
         if n.start >= song_end or i % 5 == 4:
             continue
@@ -1250,7 +1626,7 @@ def build_reimagined_midi(
     vibe.append(make_meta(song_end, 0x2F, b"", order=99)); new_tracks.append(vibe)
 
     # Soft tonal ticks from dense sources; at high intensity seed changes the pattern heavily.
-    ticks = setup_track(f"{style_name.upper()} TONAL TICKS", ch=4, program=resolved_program(style_preset, "ticks", 115, use_style_instruments=use_style_instruments), volume=int(28 + brightness * 26 + rewrite * 14), pan=96, reverb=int(8 + reverb_amount * 42), chorus=int(4 + brightness * 18))
+    ticks = setup_track(f"{style_name.upper()} TONAL TICKS", ch=4, program=resolved_program(style_preset, "ticks", 115, use_style_instruments=use_style_instruments), volume=role_volume("ticks", 28 + brightness * 26 + rewrite * 14), pan=96, reverb=int(8 + reverb_amount * 42), chorus=int(4 + brightness * 18))
     tick_src = notes_for_role(analysis, "hook_problem") or notes_for_role(analysis, "arp") or all_notes
     max_ticks = int(mix_float(80, 1400, max(arp_density, rewrite)) * mix_float(1.0, 0.12, accomp_relaxation))
     for i, n in enumerate(tick_src[:max_ticks]):
@@ -1271,7 +1647,7 @@ def build_reimagined_midi(
     ticks.append(make_meta(song_end, 0x2F, b"", order=99)); new_tracks.append(ticks)
 
     # Pads: more original harmonic source at low intensity, seed-derived voicing/progression at high intensity.
-    pad = setup_track(f"{style_name.upper()} PAD", ch=5, program=resolved_program(style_preset, "pad", 89, use_style_instruments=True), volume=int(42 + pad_density * 30 + rewrite * 6 + accomp_relaxation * 16), pan=62, reverb=int(36 + reverb_amount * 64), chorus=int(28 + brightness * 48))
+    pad = setup_track(f"{style_name.upper()} PAD", ch=5, program=resolved_program(style_preset, "pad", 89, use_style_instruments=True), volume=role_volume("pad", 42 + pad_density * 30 + rewrite * 6 + accomp_relaxation * 16), pan=62, reverb=int(36 + reverb_amount * 64), chorus=int(28 + brightness * 48))
     for idx, (st, root) in enumerate(roots):
         if st < 2 * bar or st >= song_end:
             continue
@@ -1298,7 +1674,7 @@ def build_reimagined_midi(
         relief = setup_track(
             f"{style_name.upper()} RELIEF STRINGS", ch=0,
             program=resolved_program(style_preset, "strings", 48, use_style_instruments=True),
-            volume=int(22 + accomp_relaxation * 46 + pad_density * 10),
+            volume=role_volume("relief", 22 + accomp_relaxation * 46 + pad_density * 10),
             pan=70, reverb=int(52 + reverb_amount * 70), chorus=int(26 + brightness * 38),
         )
         relief_every = 4 * bar if accomp_relaxation < 0.66 else 2 * bar
@@ -1359,7 +1735,7 @@ def build_reimagined_midi(
         motif = motif[rot:] + motif[:rot]
         motif = [pitch_into_range(p + (hook_transpose if rng_hook.random() < rewrite else 0), hook_lo, hook_hi) for p in motif]
 
-    hook = setup_track(f"{style_name.upper()} ICON HOOK", ch=6, program=resolved_program(style_preset, "hook", 80, use_style_instruments=use_style_instruments), volume=int(62 + brightness * 28 + rewrite * 10), pan=28, reverb=int(20 + reverb_amount * 52), chorus=int(18 + brightness * 42))
+    hook = setup_track(f"{style_name.upper()} ICON HOOK", ch=6, program=resolved_program(style_preset, "hook", 80, use_style_instruments=use_style_instruments), volume=role_volume("hook", 62 + brightness * 28 + rewrite * 10), pan=28, reverb=int(20 + reverb_amount * 52), chorus=int(18 + brightness * 42))
     section_step = 8 * bar
     start_section = 16 * bar if song_end > 32 * bar else 4 * bar
     rhythm_patterns = [
@@ -1401,7 +1777,7 @@ def build_reimagined_midi(
 
     # Lead contour.
     lead_src = notes_for_role(analysis, "lead") or hook_src
-    lead = setup_track(f"{style_name.upper()} LEAD CONTOUR", ch=7, program=resolved_program(style_preset, "lead", 81, use_style_instruments=use_style_instruments), volume=int(50 + brightness * 32 + rewrite * 8), pan=104, reverb=int(20 + reverb_amount * 50), chorus=int(16 + brightness * 38))
+    lead = setup_track(f"{style_name.upper()} LEAD CONTOUR", ch=7, program=resolved_program(style_preset, "lead", 81, use_style_instruments=use_style_instruments), volume=role_volume("lead", 50 + brightness * 32 + rewrite * 8), pan=104, reverb=int(20 + reverb_amount * 50), chorus=int(16 + brightness * 38))
     last_st_pitch: tuple[int, int] | None = None
     for i, n in enumerate(lead_src):
         if n.start >= song_end:
@@ -1434,7 +1810,7 @@ def build_reimagined_midi(
 
     # Support echo.
     echo_src = all_notes[::max(1, len(all_notes)//1000)] if len(all_notes) > 1000 else all_notes
-    echo = setup_track(f"{style_name.upper()} SUPPORT ECHO", ch=8, program=resolved_program(style_preset, "echo", 88, use_style_instruments=use_style_instruments), volume=int((20 + brightness * 18 + delay_amount * 24 + rewrite * 10) * mix_float(1.0, 0.65, accomp_relaxation)), pan=72, reverb=int(22 + reverb_amount * 56), chorus=int(18 + brightness * 42))
+    echo = setup_track(f"{style_name.upper()} SUPPORT ECHO", ch=8, program=resolved_program(style_preset, "echo", 88, use_style_instruments=use_style_instruments), volume=role_volume("echo", (20 + brightness * 18 + delay_amount * 24 + rewrite * 10) * mix_float(1.0, 0.65, accomp_relaxation)), pan=72, reverb=int(22 + reverb_amount * 56), chorus=int(18 + brightness * 42))
     for i, n in enumerate(echo_src):
         if n.start >= song_end or i % 7 == 6:
             continue
@@ -1451,7 +1827,7 @@ def build_reimagined_midi(
     echo.append(make_meta(song_end, 0x2F, b"", order=99)); new_tracks.append(echo)
 
     # Drums: seed-dependent variations and fills grow with intensity.
-    drums = setup_track(f"{style_name.upper()} DRUMS - {drum_feel}", ch=9, program=None, volume=int(100 + distortion * 22), pan=64, reverb=int(8 + reverb_amount * 28), chorus=4)
+    drums = setup_track(f"{style_name.upper()} DRUMS - {drum_feel}", ch=9, program=None, volume=role_volume("drums", 100 + distortion * 22), pan=64, reverb=int(8 + reverb_amount * 28), chorus=4)
     start_drum = 2 * bar
     if drum_feel in ("no_drums", "none", "no_percussion", "silent"):
         # Explicit no-drums style. Keep an empty track for compatibility, but
@@ -1961,18 +2337,53 @@ def process_file(
     target_bpm: float | None = None,
     repetition: float = 0.50,
     use_style_instruments: bool = False,
+    preserve_source_volumes: bool = False,
     harmony_lock: bool = True,
     seed: int | None = None,
     style_id: str = "synthwave",
     random_style: bool = False,
+    use_feedback: bool = False,
+    feedback_path: Path | str | None = None,
     progress: Progress | None = None,
 ) -> dict:
     source = Path(source)
     seed = normalize_seed(seed)
-    style_preset = resolve_style_preset(style_id, random_style=random_style, seed=seed)
+    source_hash = source_midi_hash(source)
+    feedback_profile = load_feedback_profile(feedback_path) if use_feedback else _empty_feedback_profile()
+    style_preset = resolve_style_preset_with_feedback(style_id, random_style=random_style, seed=seed, profile=feedback_profile if use_feedback else None)
     resolved_style_id = str(style_preset.get("id", "synthwave"))
     resolved_style_name = str(style_preset.get("name", resolved_style_id))
-    source_hash = source_midi_hash(source)
+    feedback_bias = {"enabled": False, "confidence": 0.0}
+    effective_intensity = intensity
+    effective_target_bpm = target_bpm
+    effective_repetition = repetition
+    effective_use_style_instruments = use_style_instruments
+    effective_preserve_source_volumes = preserve_source_volumes
+    effective_harmony_lock = harmony_lock
+    if use_feedback:
+        (
+            style_preset,
+            effective_intensity,
+            effective_target_bpm,
+            effective_repetition,
+            effective_use_style_instruments,
+            effective_preserve_source_volumes,
+            effective_harmony_lock,
+            feedback_bias,
+        ) = apply_feedback_preferences(
+            profile=feedback_profile,
+            style_preset=style_preset,
+            source_hash=source_hash,
+            intensity=intensity,
+            target_bpm=target_bpm,
+            repetition=repetition,
+            use_style_instruments=use_style_instruments,
+            preserve_source_volumes=preserve_source_volumes,
+            harmony_lock=harmony_lock,
+            progress=progress,
+        )
+    else:
+        log(progress, "Feedback learning: OFF")
     if output_dir is None:
         output_dir = source.parent / "reimagined_output"
     output_dir = Path(output_dir)
@@ -1994,8 +2405,8 @@ def process_file(
     analysis_txt = output_dir / f"{safe_prefix}_analysis.txt"
     midi_path, analysis = build_reimagined_midi(
         source, mid, style=resolved_style_id, style_preset=style_preset,
-        intensity=intensity, target_bpm=target_bpm, repetition=repetition,
-        use_style_instruments=use_style_instruments, harmony_lock=harmony_lock, seed=seed, progress=progress,
+        intensity=effective_intensity, target_bpm=effective_target_bpm, repetition=effective_repetition,
+        use_style_instruments=effective_use_style_instruments, preserve_source_volumes=effective_preserve_source_volumes, harmony_lock=effective_harmony_lock, seed=seed, progress=progress,
     )
     tonic, mode, scale, key_confidence = detect_key_and_mode(analysis)
     generation_summary = (
@@ -2009,13 +2420,19 @@ def process_file(
         f"  Style instruments: {style_preset.get('instruments', '')}\n"
         f"  Style meter: {style_preset.get('meter', '')}\n"
         f"  Style drum feel: {style_preset.get('drum_feel', '')}\n"
-        f"  Harmony lock: {'ON' if harmony_lock else 'OFF'}\n"
+        f"  Feedback learning: {'ON' if use_feedback else 'OFF'}\n"
+        f"  Feedback influence: {float(feedback_bias.get('confidence', 0.0)):.2f} ({int(feedback_bias.get('profile_count', 0) or 0)} relevant rating(s), approval {float(feedback_bias.get('approval', 0.0) or 0.0):+.2f})\n"
+        f"  Preserve source track volumes: {'ON' if effective_preserve_source_volumes else 'OFF'} (requested {'ON' if preserve_source_volumes else 'OFF'})\n"
+        f"  Harmony lock: {'ON' if effective_harmony_lock else 'OFF'} (requested {'ON' if harmony_lock else 'OFF'})\n"
         f"  Detected key/mode: {NOTE_NAMES[tonic]} {mode} (confidence {key_confidence:.2f})\n"
         f"  Intensity: {intensity:.2f}\n"
-        f"  Rewrite amount: {smoothstep01(intensity):.2f}\n"
+        f"  Effective intensity: {effective_intensity:.2f}\n"
+        f"  Rewrite amount: {smoothstep01(effective_intensity):.2f}\n"
         f"  Target BPM: {target_bpm if target_bpm is not None else 'auto'}\n"
+        f"  Effective BPM: {effective_target_bpm if effective_target_bpm is not None else 'auto'}\n"
         f"  Accompaniment relaxation: {repetition:.2f} (0.00 = dense/active accompaniment, 1.00 = more breathing room, fewer rapid attacks, more pads)\n"
-        f"  Style lead/melody instruments: {'ON' if use_style_instruments else 'OFF'}\n"
+        f"  Effective accompaniment relaxation: {effective_repetition:.2f}\n"
+        f"  Style lead/melody instruments: {'ON' if effective_use_style_instruments else 'OFF'} (requested {'ON' if use_style_instruments else 'OFF'})\n"
         f"  Slider behavior: intensity 0.00 = source-like cleanup, intensity 1.00 = mostly regenerated arrangement in resolved style\n"
         f"  Sample rate: {sample_rate}\n\n"
     )
@@ -2027,20 +2444,33 @@ def process_file(
     if render_audio:
         wav_path = render_wav(midi_path, wav, sr=sample_rate, progress=progress)
         if render_mp3:
-            mp3_path = convert_mp3(wav_path, mp3, base_dir=Path(__file__).resolve().parents[1], progress=progress)
+            mp3_path = convert_mp3(wav_path, mp3, base_dir=app_base_dir(), progress=progress)
     return {
         "midi": str(midi_path),
         "wav": str(wav_path) if wav_path else None,
         "mp3": str(mp3_path) if mp3_path else None,
         "analysis": str(analysis_txt),
         "seed": seed,
+        "requested_style": style_id,
         "style": resolved_style_id,
         "style_name": resolved_style_name,
         "random_style": bool(random_style),
+        "intensity": intensity,
+        "effective_intensity": effective_intensity,
         "target_bpm": target_bpm,
+        "effective_bpm": effective_target_bpm,
         "accompaniment_relaxation": repetition,
+        "effective_accompaniment_relaxation": effective_repetition,
         "repetition": repetition,
         "use_style_instruments": bool(use_style_instruments),
+        "effective_use_style_instruments": bool(effective_use_style_instruments),
+        "harmony_lock": bool(harmony_lock),
+        "effective_harmony_lock": bool(effective_harmony_lock),
+        "use_feedback": bool(use_feedback),
+        "feedback_influence": float(feedback_bias.get("confidence", 0.0) or 0.0),
+        "feedback_profile_count": int(feedback_bias.get("profile_count", 0) or 0),
+        "preserve_source_volumes": bool(effective_preserve_source_volumes),
+        "requested_preserve_source_volumes": bool(preserve_source_volumes),
         "source_hash": source_hash,
         "summary": full_summary,
     }
@@ -2058,10 +2488,13 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--bpm", type=float, default=None, help="Optional exact target BPM. Omit for source/style-derived auto BPM.")
     ap.add_argument("--repetition", type=float, default=0.50, help="Accompaniment relaxation 0.0-1.0. 0=dense/active pulses, 1=fewer rapid attacks and more pad/string relief.")
     ap.add_argument("--use-style-instruments", action="store_true", help="Use style preset GM programs for lead/melody tracks too.")
+    ap.add_argument("--preserve-source-volumes", action="store_true", help="Keep generated role/track volumes close to the estimated loudness of the source tracks, even when instruments are replaced.")
     ap.add_argument("--no-harmony-lock", action="store_true", help="Disable scale/chord correction. Default keeps copied notes harmonically locked.")
     ap.add_argument("--seed", type=int, default=None, help="Reproducible generation seed. Omit for a new random seed each run.")
     ap.add_argument("--style", default="synthwave", help="Style preset id, e.g. synthwave, darksynth, techno, drum_and_bass. See app/styles/style_presets.json.")
     ap.add_argument("--random-style", action="store_true", help="Resolve a random style deterministically from the generation seed.")
+    ap.add_argument("--use-feedback", action="store_true", help="Use local thumbs-up/thumbs-down feedback profile to gently bias future renders.")
+    ap.add_argument("--feedback-path", default=None, help="Optional feedback profile JSON path. Default: app_data/feedback/ratings.json")
     args = ap.parse_args(argv)
     result = process_file(
         args.source,
@@ -2074,10 +2507,13 @@ def main(argv: list[str] | None = None) -> int:
         target_bpm=args.bpm,
         repetition=max(0.0, min(1.0, args.repetition)),
         use_style_instruments=args.use_style_instruments,
+        preserve_source_volumes=args.preserve_source_volumes,
         harmony_lock=not args.no_harmony_lock,
         seed=args.seed,
         style_id=args.style,
         random_style=args.random_style,
+        use_feedback=args.use_feedback,
+        feedback_path=args.feedback_path,
         progress=print,
     )
     print(json.dumps(result, indent=2, ensure_ascii=False))

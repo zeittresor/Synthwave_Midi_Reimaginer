@@ -1,0 +1,12 @@
+Synthwave MIDI Reimaginer GUI v0.2.9
+====================================
+
+- Added Keep source track volumes option in the GUI.
+- Added preserve_source_volumes support to the render engine and CLI.
+- MIDI analysis now estimates average note velocity and source track volume per track.
+- Generated analysis TXT now records whether source-volume preservation was enabled.
+- Updated README, tooltips and language files for the new mix-balance option.
+
+Notes
+-----
+This option is intentionally disabled by default. Some style presets benefit from their own balance, while other MIDIs sound better when the original role loudness is preserved.
